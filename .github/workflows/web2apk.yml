@@ -7,8 +7,6 @@ on:
         required: true
       webview_url:
         required: true
-      username:
-        required: true
       uid:
         required: true
       icon_url:
@@ -43,7 +41,6 @@ jobs:
           {
             "app_name": "${{ github.event.inputs.app_name }}",
             "webview_url": "${{ github.event.inputs.webview_url }}",
-            "username": "${{ github.event.inputs.username }}",
             "uid": "${{ github.event.inputs.uid }}"
           }
           EOF
