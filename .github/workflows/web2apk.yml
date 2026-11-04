@@ -81,13 +81,9 @@ jobs:
           # 2. UPDATE PUBSPEC & ICON
           mkdir -p assets
           
-          # INSTALL IMAGEMAGICK (BIAR CONVERT JALAN)
-          sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
-          
+          # KALO ADA URL ICON, DOWNLOAD. KALO GAK ADA, BIARIN DEFAULT FLUTTER.
           if [ -n "${{ github.event.inputs.icon_url }}" ]; then
             curl -L "${{ github.event.inputs.icon_url }}" -o assets/icon.png
-          else
-            convert -size 512x512 xc:blue assets/icon.png
           fi
 
           cat > pubspec.yaml << 'EOF'
@@ -198,7 +194,13 @@ jobs:
               super.initState();
               _controller = WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                ..setNavigationDelegate(NavigationDelegate(onPermissionRequest: (request) => request.grant()))
+                ..setNavigationDelegate(
+                  NavigationDelegate(
+                    onNavigationRequest: (NavigationRequest request) {
+                      return NavigationDecision.navigate;
+                    },
+                  ),
+                )
                 ..loadRequest(Uri.parse(widget.url));
             }
             @override
