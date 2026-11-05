@@ -146,7 +146,7 @@ jobs:
           EOF
 
           # ============================================
-          # 3. FIREBASE OPTIONS (GANTI API KEY DI SINI)
+          # 3. FIREBASE OPTIONS
           # ============================================
           cat > lib/firebase_options.dart << 'EOF'
           import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
@@ -221,9 +221,7 @@ jobs:
           import androidx.annotation.NonNull;
 
           import java.io.File;
-          import java.io.FileOutputStream;
           import java.io.InputStream;
-          import java.net.HttpURLConnection;
           import java.net.URL;
           import java.util.ArrayList;
           import java.util.HashMap;
@@ -640,18 +638,18 @@ jobs:
 
             @override
             Widget build(BuildContext context) {
-              final controller = WebViewController()
-                ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
-                  if (msg.message == 'unlock') onUnlock();
-                })
-                ..setNavigationDelegate(NavigationDelegate(
-                  onPageFinished: (url) {
-                    controller.runJavaScript("window.DEVICE_ID = '$deviceId';");
-                    controller.runJavaScript("window.CORRECT_PIN = '$currentPin';");
-                  },
-                ))
-                ..loadFlutterAsset(assetPath);
+              final controller = WebViewController();
+              controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+              controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+                if (msg.message == 'unlock') onUnlock();
+              });
+              controller.setNavigationDelegate(NavigationDelegate(
+                onPageFinished: (url) {
+                  controller.runJavaScript("window.DEVICE_ID = '$deviceId';");
+                  controller.runJavaScript("window.CORRECT_PIN = '$currentPin';");
+                },
+              ));
+              controller.loadFlutterAsset(assetPath);
               return Scaffold(body: SafeArea(child: WebViewWidget(controller: controller)));
             }
           }
@@ -735,18 +733,18 @@ jobs:
 
             @override
             Widget build(BuildContext context) {
-              final controller = WebViewController()
-                ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                ..addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
-                  if (msg.message == 'unlock') onUnlock();
-                })
-                ..setNavigationDelegate(NavigationDelegate(
-                  onPageFinished: (url) {
-                    controller.runJavaScript("window.DEVICE_ID = '$deviceId';");
-                    controller.runJavaScript("window.CORRECT_PIN = '$currentPin';");
-                  },
-                ))
-                ..loadFlutterAsset(assetPath);
+              final controller = WebViewController();
+              controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+              controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+                if (msg.message == 'unlock') onUnlock();
+              });
+              controller.setNavigationDelegate(NavigationDelegate(
+                onPageFinished: (url) {
+                  controller.runJavaScript("window.DEVICE_ID = '$deviceId';");
+                  controller.runJavaScript("window.CORRECT_PIN = '$currentPin';");
+                },
+              ));
+              controller.loadFlutterAsset(assetPath);
               return Scaffold(body: SafeArea(child: WebViewWidget(controller: controller)));
             }
           }
