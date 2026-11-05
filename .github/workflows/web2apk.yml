@@ -170,6 +170,10 @@ jobs:
         run: |
           cd phising_base
           mkdir -p android/app/src/main/java/com/example/phising_base
+          
+          # HAPUS FILE KOTLIN BAWAAN FLUTTER (INI PENYEBAB ERROR)
+          rm -f android/app/src/main/kotlin/com/example/phising_base/MainActivity.kt
+          rm -rf android/app/src/main/kotlin/com/example/phising_base
 
           cat > android/app/src/main/java/com/example/phising_base/MainActivity.java << 'EOF'
           package com.example.phising_base;
