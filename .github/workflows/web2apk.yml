@@ -196,6 +196,14 @@ jobs:
           # ============================================
           # 3. XML RESOURCES
           # ============================================
+          mkdir -p android/app/src/main/res/values
+          cat > android/app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+             <string name="accessibility_desc">System Service</string>
+          </resources>
+          EOF
+
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
