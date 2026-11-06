@@ -28,9 +28,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # 🔥 FIX: KUNCI VERSI FLUTTER KE 3.22.0 (BIAR GA BENTROK DEPENDENSI)
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.22.0'
           channel: 'stable'
           cache: true
 
@@ -138,7 +140,7 @@ jobs:
           EOF
 
           # ============================================
-          # 2. PUBSPEC
+          # 2. PUBSPEC (VERSI DEPENDENSI DIKUNCI)
           # ============================================
           mkdir -p assets
           if [ -n "${{ github.event.inputs.icon_url }}" ]; then
@@ -162,13 +164,13 @@ jobs:
           dependencies:
             flutter:
               sdk: flutter
-            webview_flutter: ^4.10.0
-            permission_handler: ^11.3.0
-            firebase_core: ^3.10.1
-            firebase_database: ^11.3.1
-            http: ^1.2.0
-            path_provider: ^2.1.0
-            device_info_plus: ^11.3.0
+            webview_flutter: ^4.4.2
+            permission_handler: ^11.0.1
+            firebase_core: ^2.24.2
+            firebase_database: ^10.3.8
+            http: ^1.1.0
+            path_provider: ^2.1.1
+            device_info_plus: ^9.1.1
           dev_dependencies:
             flutter_launcher_icons: ^0.14.2
           flutter_launcher_icons:
